@@ -471,12 +471,12 @@ class Core:
                     and not self._stop_requested.is_set()
                 ):
                     now = time.monotonic()
+                    owners = listener_owners(self.mixed_port, self.port)
                     if now - last_progress >= 5:
                         self._record(
-                            f"event=start_progress pid={self.process.pid} elapsed_ms={int((now - self._start_time) * 1000)} remaining_ms={max(0, int((deadline - now) * 1000))} tun_pending={tun_pending}"
+                            f"event=start_progress pid={self.process.pid} elapsed_ms={int((now - self._start_time) * 1000)} remaining_ms={max(0, int((deadline - now) * 1000))} tun_pending={tun_pending} listeners={owners}"
                         )
                         last_progress = now
-                    owners = listener_owners(self.mixed_port, self.port)
                     stage = (
                         "listeners"
                         if not all(self.process.pid in pids for pids in owners.values())

@@ -11,6 +11,19 @@ def pytest_configure(config):
         Path(config.option.basetemp).parent.mkdir(parents=True, exist_ok=True)
 
 
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    report = outcome.get_result()
+    root = item.funcargs.get("tmp_path")
+    if report.failed and root:
+        for path in (root / "logs/network.jsonl", root.parent / "logs/network.jsonl"):
+            if path.is_file():
+                report.sections.append(
+                    ("Nodera core log: " + str(path), path.read_text(encoding="utf-8")[-20000:])
+                )
+
+
 @pytest.fixture(autouse=True)
 def offline_automatic_client_location(monkeypatch):
     # Tests must never contact a public IP-location service through the UI timer.
