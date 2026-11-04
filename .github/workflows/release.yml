@@ -3,13 +3,22 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing release tag to build and attach to a draft (leave empty for artifacts only)'
+        required: false
+        type: string
 permissions:
   contents: write
 jobs:
   release:
     runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -17,7 +26,7 @@ jobs:
         shell: pwsh
         run: |
           $version = python -c 'from nodera import __version__; print(__version__)'
-          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") { throw 'Release tag must match nodera.__version__' }
+          if ($env:RELEASE_TAG -and $env:RELEASE_TAG -ne "v$version") { throw 'Release tag must match nodera.__version__' }
       - run: python -m venv .venv
       - run: .venv\Scripts\python -m pip install -e ".[dev]"
       - run: .venv\Scripts\python scripts/prepare_core.py
@@ -27,20 +36,20 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
       - name: Install installer compiler
-        run: choco install innosetup --version=6.5.4 --yes --no-progress
+        run: choco install innosetup --version=6.5.4 --allow-downgrade --yes --no-progress
       - run: .\scripts\build.ps1 -Installer
       - uses: actions/upload-artifact@v4
         with:
           name: Nodera-installer
           path: dist/installers/*
       - name: Create draft release for review
-        if: github.ref_type == 'tag'
+        if: env.RELEASE_TAG != ''
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          $notes = "docs/releases/$env:GITHUB_REF_NAME.md"
-          $releaseArguments = @('release', 'create', $env:GITHUB_REF_NAME, '--draft', '--verify-tag', '--title', "Nodera $env:GITHUB_REF_NAME")
+          $notes = "docs/releases/$env:RELEASE_TAG.md"
+          $releaseArguments = @('release', 'create', $env:RELEASE_TAG, '--draft', '--verify-tag', '--title', "Nodera $env:RELEASE_TAG")
           if (Test-Path -LiteralPath $notes) {
             $releaseArguments += @('--notes-file', $notes)
           } else {
