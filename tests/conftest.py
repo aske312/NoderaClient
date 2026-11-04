@@ -1,6 +1,14 @@
+from pathlib import Path
+
 import pytest
 
 from nodera.models import ClientError
+
+
+def pytest_configure(config):
+    # pytest creates basetemp itself, but its parent may not exist on a clean checkout.
+    if config.option.basetemp:
+        Path(config.option.basetemp).parent.mkdir(parents=True, exist_ok=True)
 
 
 @pytest.fixture(autouse=True)
