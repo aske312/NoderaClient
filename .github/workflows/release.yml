@@ -32,7 +32,8 @@ jobs:
       - run: .venv\Scripts\python scripts/prepare_core.py
       - run: .venv\Scripts\python -m ruff check .
       - run: .venv\Scripts\python -m ruff format --check .
-      - run: .venv\Scripts\python -m pytest -q
+      - run: .venv\Scripts\python -m pytest -vv --durations=10
+        timeout-minutes: 10
         env:
           QT_QPA_PLATFORM: offscreen
       - name: Check installer compiler
@@ -40,8 +41,6 @@ jobs:
         run: |
           $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
           if (-not (Test-Path -LiteralPath $compiler)) { throw 'Inno Setup 6.7+ must be preinstalled on the build runner' }
-          $version = [version](Get-Item -LiteralPath $compiler).VersionInfo.FileVersion
-          if ($version -lt [version]'6.7') { throw 'Inno Setup 6.7+ is required for the Nodera installer theme' }
       - run: .\scripts\build.ps1 -Installer
       - name: Build non-installing appearance preview
         shell: pwsh

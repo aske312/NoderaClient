@@ -38,7 +38,6 @@ try {
         if (-not (Test-Path -LiteralPath $compilerPath)) {
             throw 'Inno Setup 6.7+ is required on the build machine.'
         }
-        if ([version](Get-Item -LiteralPath $compilerPath).VersionInfo.FileVersion -lt [version]'6.7') { throw 'Inno Setup 6.7+ is required for the Nodera installer theme.' }
         $installerOutput = Join-Path $projectRoot 'dist\installers'
         & $compilerPath ('/DAppVersion=' + $metadata.version) ('/DAppSource=' + (Split-Path -Parent $appPath)) ('/DInstallerOutput=' + $installerOutput) packaging/Nodera.iss
         if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }

@@ -1,3 +1,6 @@
+#if VER < EncodeVer(6, 7, 0)
+  #error Inno Setup 6.7 or newer is required for the Nodera installer theme
+#endif
 #ifndef AppVersion
   #error AppVersion must be provided by scripts/build.ps1
 #endif

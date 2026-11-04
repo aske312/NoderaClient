@@ -13,7 +13,8 @@ jobs:
       - run: .venv\Scripts\python scripts/prepare_core.py
       - run: .venv\Scripts\python -m ruff check .
       - run: .venv\Scripts\python -m ruff format --check .
-      - run: .venv\Scripts\python -m pytest -q
+      - run: .venv\Scripts\python -m pytest -vv --durations=10
+        timeout-minutes: 10
         env:
           QT_QPA_PLATFORM: offscreen
       - run: .\scripts\build.ps1
