@@ -5,6 +5,7 @@ import sys
 from PySide6.QtCore import QLockFile, QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from nodera.autostart import handle_command
 from nodera.core import secure_directory
 from nodera.elevation import ensure_admin, wait_for_previous_instance
 from nodera.instance import RestartServer, acquire_instance, instance_name
@@ -26,6 +27,9 @@ def set_app_identity():
 
 
 def main() -> int:
+    command_result = handle_command(sys.argv[1:])
+    if command_result is not None:
+        return command_result
     set_app_identity()
     app = QApplication(sys.argv)
     app.setApplicationName("Nodera")
@@ -57,13 +61,16 @@ def main() -> int:
             library = ProfileLibrary()
             warning = str(exc)
         window = MainWindow(store, settings, library.active, library=library)
+        # Closing a hidden tray window does not emit lastWindowClosed.
+        window.shutdown_complete.connect(app.quit)
         handover = RestartServer(
             instance_name(root),
             lambda: window.connected or window.pending_connect,
             window.exit_app,
             app,
         )
-        window.show()
+        if "--autostart" not in sys.argv or not window.tray.isVisible():
+            window.show()
         if warning:
             window.error(warning)
         elif "--connect" in sys.argv or resume:

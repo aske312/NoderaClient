@@ -1,4 +1,5 @@
 import os
+import threading
 import time
 import traceback
 from copy import deepcopy
@@ -79,6 +80,8 @@ class Task(QThread):
 class MainWindow(
     FramelessWindowMixin, ProfilesMixin, WorkbenchMixin, PresentationMixin, FlowsMixin, QMainWindow
 ):
+    shutdown_complete = Signal()
+
     def __init__(self, store, settings, profile, library=None):
         super().__init__()
         self.store, self.settings, self.profile = store, settings, profile
@@ -106,6 +109,8 @@ class MainWindow(
         self.quit_requested = False
         self.connected = False
         self.closing = False
+        self.shutdown_event = threading.Event()
+        self.shutdown_emitted = False
         self.groups_data = []
         self.flow_monitor = FlowMonitor(settings.flow_history_minutes * 60)
         self.api_failures = 0
@@ -342,6 +347,8 @@ class MainWindow(
             )
             index = 2
         self.stack.setCurrentIndex(index)
+        if index == 2:
+            self.refresh_autostart()
         for i, button in self.nav.items():
             button.setChecked(i == index)
         if hasattr(self, "timer"):
@@ -370,7 +377,11 @@ class MainWindow(
         self.task = Task(callback, self)
         self.task.debug.connect(lambda message: self.log(message, "debug", "Worker"))
         self.task.result.connect(success)
-        self.task.failed.connect(failure or self.error)
+        self.task.failed.connect(
+            lambda message: (
+                self.log(message, "warning") if self.closing else (failure or self.error)(message)
+            )
+        )
         self.task.finished.connect(self.task_finished)
         self.refresh_controls()
         self.task.start()
@@ -1288,9 +1299,10 @@ class MainWindow(
             self.hide()
             return
         self.closing = True
-        self.timer.stop()
-        self.subscription_timer.stop()
-        self.log_timer.stop()
+        self.shutdown_event.set()
+        self.core.cancel_start()
+        for timer in self.findChildren(QTimer):
+            timer.stop()
         self.cancel_geo()
         if self.poll_task or self.inspections or self.geo_task:
             event.ignore()
@@ -1307,3 +1319,6 @@ class MainWindow(
             return
         self.tray.hide()
         event.accept()
+        if not self.shutdown_emitted:
+            self.shutdown_emitted = True
+            self.shutdown_complete.emit()

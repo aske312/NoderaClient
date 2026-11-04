@@ -127,6 +127,7 @@ class SystemProxy:
         self.path = root / "proxy-session.dpapi"
         self.backend = backend
         self.guard = guard or self.start_guard
+        self._guard_process = None
 
     def api(self):
         return self.backend if self.backend is not None else WindowsProxy()
@@ -143,6 +144,7 @@ class SystemProxy:
 
     def restore(self, token=None):
         if not self.pending:
+            self.wait_guard()
             return
         with journal_lock(self.root):
             if not self.pending:
@@ -164,6 +166,24 @@ class SystemProxy:
             if restored != current:
                 api.write(restored)
             self.path.unlink()
+        self.wait_guard()
+
+    def wait_guard(self):
+        """Join only the recovery process created by this SystemProxy instance."""
+        process = self._guard_process
+        if process is None or self.pending:
+            return
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            # Its journal is gone; no proxy recovery remains to perform.
+            process.terminate()
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=3)
+        self._guard_process = None
 
     def enable(self, port):
         self.restore()
@@ -201,6 +221,7 @@ class SystemProxy:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        self._guard_process = process
         try:
             deadline = time.monotonic() + 10
             while not ready.exists():

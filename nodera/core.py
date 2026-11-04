@@ -300,6 +300,7 @@ class Core:
     def __init__(self, root: Path, core_resolver=None):
         self.root = root
         self._operation_lock = threading.RLock()
+        self._stop_requested = threading.Event()
         self.route_health = RouteHealth()
         self.frozen_routes = {}
         self._log_lock = threading.Lock()
@@ -346,6 +347,7 @@ class Core:
         if self.running:
             raise ClientError("Ядро уже запущено.")
         self.stop("prepare new session")
+        self._stop_requested.clear()
         self.trace.configure(settings.log_limit, settings.save_logs)
         self.connection_log.configure(
             settings.save_connection_logs,
@@ -463,7 +465,11 @@ class Core:
             last_progress = 0.0
             with self._client() as client:
                 deadline = time.monotonic() + (30 if config["tun"]["enable"] else 15)
-                while time.monotonic() < deadline and self.running:
+                while (
+                    time.monotonic() < deadline
+                    and self.running
+                    and not self._stop_requested.is_set()
+                ):
                     now = time.monotonic()
                     if now - last_progress >= 5:
                         self._record(
@@ -520,6 +526,8 @@ class Core:
                             return str(version)
                     except (httpx.HTTPError, ValueError, OSError):
                         time.sleep(0.15)
+            if self._stop_requested.is_set():
+                raise ClientError("Подключение отменено при завершении приложения.")
             if tun_pending:
                 raise ClientError(
                     "Windows не завершила запуск TUN за 30 секунд. Подробности — в журнале ядра."
@@ -869,6 +877,9 @@ class Core:
                     and member in item.get("all", [])
                 ):
                     controller.select(group, member)
+
+    def cancel_start(self):
+        self._stop_requested.set()
 
     @serialized
     def stop(self, reason="requested") -> None:

@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from nodera import __version__, updater
+from nodera import __version__, autostart, updater
 from nodera.bundled_core import core_manifest
 from nodera.controller import Controller
 from nodera.controls import ComboBox as QComboBox
@@ -57,6 +57,51 @@ def combo(values, current):
 
 
 class WorkbenchMixin:
+    def refresh_autostart(self):
+        if self.closing or "autostart" in self.inspections:
+            return
+        self.autostart_check.setEnabled(False)
+
+        def done(enabled):
+            self.autostart_check.blockSignals(True)
+            self.autostart_check.setChecked(enabled)
+            self.autostart_check.blockSignals(False)
+            self.autostart_loaded = True
+
+        def failed(message):
+            self.autostart_loaded = False
+            self.settings_result.setText(message)
+
+        self.start_inspection("autostart", autostart.is_enabled, done, failed, session_bound=False)
+        self.inspections["autostart"].finished.connect(
+            lambda: self.autostart_check.setEnabled(self.autostart_loaded and not self.closing)
+        )
+
+    def change_autostart(self, enabled):
+        if not self.autostart_loaded or self.closing or "autostart" in self.inspections:
+            return
+        self.autostart_check.setEnabled(False)
+
+        def done(_):
+            self.settings_result.setText("Автозапуск включён" if enabled else "Автозапуск выключен")
+
+        def failed(message):
+            self.autostart_check.blockSignals(True)
+            self.autostart_check.setChecked(not enabled)
+            self.autostart_check.blockSignals(False)
+            self.settings_result.setText(message)
+
+        self.start_inspection(
+            "autostart",
+            lambda: autostart.set_enabled(enabled),
+            done,
+            failed,
+            session_bound=False,
+        )
+        self.inspections["autostart"].finished.connect(
+            lambda: self.autostart_check.setEnabled(not self.closing)
+        )
+
     def embed_settings_tools(self):
         for index, attribute in (
             (3, "events_section"),
@@ -199,6 +244,8 @@ class WorkbenchMixin:
         self.app_update_status.setText("Загрузка и проверка установщика…")
 
         def downloaded(path):
+            if self.closing:
+                return
             try:
                 updater.launch_installer(path, release)
             except ClientError as exc:
@@ -211,7 +258,12 @@ class WorkbenchMixin:
             self.app_update_status.setText(message)
 
         self.run_task(
-            lambda: updater.download_release(release, self.store.root, proxy=proxy),
+            lambda: updater.download_release(
+                release,
+                self.store.root,
+                proxy=proxy,
+                cancelled=self.shutdown_event,
+            ),
             downloaded,
             failed,
         )

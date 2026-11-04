@@ -67,3 +67,43 @@ def test_detected_point_populates_settings_without_changing_routes(tmp_path, mon
     assert window.world_map.client_point["name"] == "Helsinki"
     window.close()
     app.processEvents()
+
+
+def test_startup_switch_reads_real_state_and_reverts_failed_changes(tmp_path, monkeypatch):
+    import time
+
+    from nodera.models import ClientError
+
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr("nodera.autostart.is_enabled", lambda: True)
+    window = MainWindow(Store(tmp_path), Settings(update_hours=0), None)
+    window.timer.stop()
+
+    def wait():
+        deadline = time.monotonic() + 5
+        while window.inspections and time.monotonic() < deadline:
+            app.processEvents()
+            QTest.qWait(10)
+        app.processEvents()
+        assert not window.inspections
+
+    try:
+        window.navigate(2)
+        wait()
+        assert window.autostart_check.isChecked() and window.autostart_check.isEnabled()
+
+        def fail(_):
+            raise ClientError("Task Scheduler unavailable")
+
+        monkeypatch.setattr("nodera.autostart.set_enabled", fail)
+        window.autostart_check.setChecked(False)
+        wait()
+        assert window.autostart_check.isChecked()
+        assert "Task Scheduler unavailable" in window.settings_result.text()
+        monkeypatch.setattr("nodera.autostart.set_enabled", lambda value: value)
+        window.autostart_check.setChecked(False)
+        wait()
+        assert not window.autostart_check.isChecked()
+    finally:
+        window.close()
+        app.processEvents()

@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
+from nodera import __version__
 from nodera.models import Profile, Settings
 from nodera.storage import Store
 from nodera.ui import MainWindow
@@ -31,7 +32,7 @@ def test_empty_dashboard_plus_menu_and_shared_version(tmp_path, monkeypatch):
     assert window.sidebar_toggle.y() > max(button.y() for button in window.nav.values())
     assert window.sidebar_toggle.width() == 28
     assert window.sidebar_version.text() == window.application_version.text() == version_text()
-    assert version_text().startswith("v. 0.0.1 build:")
+    assert version_text().startswith(f"v. {__version__} build:")
     from nodera.dialogs import SubscriptionDialog
 
     calls = []

@@ -15,6 +15,7 @@ from nodera.models import ClientError
 REPOSITORY = "aske312/NoderaClient"
 API_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
 MAX_INSTALLER = 512 * 1024 * 1024
+INSTALLER_NAME = "Nodera-Setup.exe"
 
 
 def version_tuple(value):
@@ -34,7 +35,7 @@ class Release:
 
     @property
     def filename(self):
-        return f"Nodera-Setup-{self.version}-x64.exe"
+        return INSTALLER_NAME
 
 
 def check_release(current=__version__, transport=None, proxy=None):
@@ -58,7 +59,7 @@ def check_release(current=__version__, transport=None, proxy=None):
         if version_tuple(tag) <= version_tuple(current):
             return None
         version = tag.removeprefix("v")
-        filename = f"Nodera-Setup-{version}-x64.exe"
+        filename = INSTALLER_NAME
         asset = next(item for item in data["assets"] if item.get("name") == filename)
         digest = asset.get("digest", "")
         expected_url = f"https://github.com/{REPOSITORY}/releases/download/{tag}/{filename}"
@@ -76,10 +77,13 @@ def check_release(current=__version__, transport=None, proxy=None):
         ) from exc
 
 
-def download_release(release, root: Path, transport=None, proxy=None):
-    target = root / "updates" / release.filename
+def download_release(release, root: Path, transport=None, proxy=None, cancelled=None):
+    version_tuple(release.version)
+    target = root / "updates" / release.version / release.filename
     temporary = target.with_suffix(".download")
     try:
+        if cancelled and cancelled.is_set():
+            raise ClientError("Загрузка отменена при завершении приложения.")
         target.parent.mkdir(parents=True, exist_ok=True)
         digest, size = hashlib.sha256(), 0
         with (
@@ -97,6 +101,8 @@ def download_release(release, root: Path, transport=None, proxy=None):
                 raise ValueError("Insecure redirect")
             with temporary.open("wb") as stream:
                 for chunk in response.iter_bytes():
+                    if cancelled and cancelled.is_set():
+                        raise ClientError("Загрузка отменена при завершении приложения.")
                     size += len(chunk)
                     if size > release.size or size > MAX_INSTALLER:
                         raise ValueError("Installer exceeds expected size")

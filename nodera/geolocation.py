@@ -109,7 +109,7 @@ class GeoClient:
             follow_redirects=False,
         )
 
-    def resolve(self, host, dns=None):
+    def resolve(self, host, dns=None, cancelled=None):
         host = valid_host(host)
         if not host:
             raise ClientError("В подписке нет корректного адреса этого участка.")
@@ -130,6 +130,8 @@ class GeoClient:
                 for resolver in resolvers:
                     query, visited, found = host, set(), False
                     for _ in range(8):
+                        if cancelled and cancelled.is_set():
+                            raise ClientError("Проверка IP остановлена.")
                         if query in visited:
                             break
                         visited.add(query)
@@ -248,7 +250,7 @@ class GeoClient:
             if cancelled and cancelled.is_set():
                 break
             try:
-                addresses = self.resolve(endpoint["host"], dns)
+                addresses = self.resolve(endpoint["host"], dns, cancelled)
             except ClientError as exc:
                 rows.append({**endpoint, "ip": "", "country": "", "status": str(exc)})
                 continue

@@ -107,6 +107,16 @@ def build_settings(self):
     )
     self.close_tray_check = switch(self.settings.close_to_tray)
     setting(form, "Закрывать окно в трей", self.close_tray_check)
+    self.autostart_check = switch(False)
+    self.autostart_check.setEnabled(False)
+    self.autostart_loaded = False
+    self.autostart_check.toggled.connect(self.change_autostart)
+    setting(
+        form,
+        "Запускать с Windows",
+        self.autostart_check,
+        "В трее при входе в систему · Применяется сразу",
+    )
     self.update_interval = selector(
         [
             ("Вручную", 0),

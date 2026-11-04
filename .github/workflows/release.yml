@@ -35,13 +35,33 @@ jobs:
       - run: .venv\Scripts\python -m pytest -q
         env:
           QT_QPA_PLATFORM: offscreen
-      - name: Install installer compiler
-        run: choco install innosetup --version=6.5.4 --allow-downgrade --yes --no-progress
+      - name: Check installer compiler
+        shell: pwsh
+        run: |
+          $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
+          if (-not (Test-Path -LiteralPath $compiler)) { throw 'Inno Setup 6.7+ must be preinstalled on the build runner' }
+          $version = [version](Get-Item -LiteralPath $compiler).VersionInfo.FileVersion
+          if ($version -lt [version]'6.7') { throw 'Inno Setup 6.7+ is required for the Nodera installer theme' }
       - run: .\scripts\build.ps1 -Installer
+      - name: Build non-installing appearance preview
+        shell: pwsh
+        run: |
+          $metadata = Get-Content -Raw nodera/resources/build-info.json | ConvertFrom-Json
+          $source = Join-Path $pwd ('dist/builds/' + $metadata.artifact_id + '/Nodera')
+          $output = Join-Path $pwd 'dist/installer-preview'
+          $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
+          & $compiler /Q /DPreview ('/DAppVersion=' + $metadata.version) ('/DAppSource=' + $source) ('/DInstallerOutput=' + $output) packaging/Nodera.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Installer preview compilation failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nodera-installer-preview
+          path: dist/installer-preview/Nodera-Setup-Preview.exe
       - uses: actions/upload-artifact@v4
         with:
           name: Nodera-installer
-          path: dist/installers/*
+          path: |
+            dist/installers/Nodera-Setup.exe
+            dist/installers/Nodera-Setup.exe.sha256
       - name: Create draft release for review
         if: env.RELEASE_TAG != ''
         env:
@@ -55,6 +75,6 @@ jobs:
           } else {
             $releaseArguments += '--generate-notes'
           }
-          $releaseArguments += @(Get-ChildItem -LiteralPath dist/installers -File | ForEach-Object FullName)
+          $releaseArguments += @('dist/installers/Nodera-Setup.exe', 'dist/installers/Nodera-Setup.exe.sha256')
           & gh @releaseArguments
           if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed' }

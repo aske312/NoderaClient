@@ -31,15 +31,18 @@ try {
     Write-Output ('Portable application: ' + $appPath + ' (distribute the entire Nodera directory)')
     Write-Output 'Latest build shortcut: dist\Nodera.lnk'
     if ($Installer) {
+        & $pythonPath scripts/prepare_installer.py
+        if ($LASTEXITCODE -ne 0) { throw 'Installer artwork preparation failed' }
         $compiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue
         $compilerPath = if ($compiler) { $compiler.Source } else { Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe' }
         if (-not (Test-Path -LiteralPath $compilerPath)) {
-            throw 'Inno Setup 6 is required on the build machine. Install it, then run scripts/build.ps1 -Installer.'
+            throw 'Inno Setup 6.7+ is required on the build machine.'
         }
+        if ([version](Get-Item -LiteralPath $compilerPath).VersionInfo.FileVersion -lt [version]'6.7') { throw 'Inno Setup 6.7+ is required for the Nodera installer theme.' }
         $installerOutput = Join-Path $projectRoot 'dist\installers'
         & $compilerPath ('/DAppVersion=' + $metadata.version) ('/DAppSource=' + (Split-Path -Parent $appPath)) ('/DInstallerOutput=' + $installerOutput) packaging/Nodera.iss
         if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }
-        $installerPath = Join-Path $installerOutput ('Nodera-Setup-' + $metadata.version + '-x64.exe')
+        $installerPath = Join-Path $installerOutput 'Nodera-Setup.exe'
         $installerHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
         [IO.File]::WriteAllText($installerPath + '.sha256', $installerHash + '  ' + (Split-Path -Leaf $installerPath) + [Environment]::NewLine)
         Write-Output ('Installer: ' + $installerPath)
