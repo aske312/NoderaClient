@@ -1,6 +1,7 @@
 import base64
 import ctypes
 import os
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -66,6 +67,22 @@ def test_installer_commands_report_errors_without_opening_application(monkeypatc
 
     monkeypatch.setattr(autostart, "set_enabled", fail)
     assert app.main() == 2
+
+
+def test_installer_entry_point_does_not_load_qt():
+    script = """
+import runpy,sys
+from pathlib import Path
+import nodera.autostart as startup
+startup.is_enabled=lambda: False
+sys.modules['PySide6']=None
+sys.argv=['main.py','--autostart-status']
+runpy.run_path(str(Path(startup.__file__).parents[1]/'main.py'),run_name='__main__')
+"""
+    result = subprocess.run(
+        [autostart.sys.executable, "-c", script], capture_output=True, text=True
+    )
+    assert result.returncode == 1 and not result.stderr
 
 
 @pytest.mark.skipif(

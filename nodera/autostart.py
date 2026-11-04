@@ -108,9 +108,13 @@ def set_enabled(enabled):
 def handle_command(arguments):
     """Installer commands run without constructing QApplication or touching profiles."""
     try:
-        if arguments == ["--autostart-status"]:
+        if arguments[:1] == ["--autostart-status"]:
+            if len(arguments) != 1:
+                return 2
             return 0 if is_enabled() else 1
-        if arguments == ["--remove-autostart"]:
+        if arguments[:1] == ["--remove-autostart"]:
+            if len(arguments) != 1:
+                return 2
             run_operation("remove")
             return 0
         if arguments[:1] == ["--configure-autostart"]:
