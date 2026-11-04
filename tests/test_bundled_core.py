@@ -1,11 +1,31 @@
 import hashlib
+import io
 import sys
 
 import pytest
 
 from nodera.bundled_core import bundled_location, resolve_core
 from nodera.models import ClientError
-from scripts.prepare_core import put_verified
+from scripts.prepare_core import download, put_verified
+
+
+def test_build_download_retries_timeout_before_atomic_verified_save(tmp_path, monkeypatch):
+    attempts = []
+
+    def fetch(*args, **kwargs):
+        attempts.append(True)
+        if len(attempts) == 1:
+            raise TimeoutError("Upstream timeout")
+        return io.BytesIO(b"verified")
+
+    monkeypatch.setattr("scripts.prepare_core.urllib.request.urlopen", fetch)
+    monkeypatch.setattr("scripts.prepare_core.time.sleep", lambda _: None)
+    target = tmp_path / "component"
+    assert (
+        download("https://example.com/component", target, hashlib.sha256(b"verified").hexdigest())
+        == b"verified"
+    )
+    assert len(attempts) == 2 and target.read_bytes() == b"verified"
 
 
 def test_frozen_core_path_is_inside_application_not_working_directory(tmp_path, monkeypatch):

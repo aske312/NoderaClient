@@ -4,10 +4,13 @@ The installed application never downloads or replaces its core at runtime.
 """
 
 import hashlib
+import http.client
 import io
 import json
 import os
 import tempfile
+import time
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -39,8 +42,24 @@ def download(url: str, path: Path, expected: str) -> bytes:
     if path.exists() and digest(path.read_bytes()) == expected:
         return path.read_bytes()
     request = urllib.request.Request(url, headers={"User-Agent": "Nodera-build"})
-    with urllib.request.urlopen(request, timeout=60) as response:
-        data = response.read(MAX_DOWNLOAD + 1)
+    for attempt in range(3):
+        try:
+            print(f"Downloading {path.name} (attempt {attempt + 1}/3)", flush=True)
+            with urllib.request.urlopen(request, timeout=60) as response:
+                data = response.read(MAX_DOWNLOAD + 1)
+            break
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            ConnectionError,
+            http.client.IncompleteRead,
+        ) as exc:
+            if (
+                isinstance(exc, urllib.error.HTTPError)
+                and exc.code not in {408, 429, 500, 502, 503, 504}
+            ) or attempt == 2:
+                raise
+            time.sleep(2 ** (attempt + 1))
     if len(data) > MAX_DOWNLOAD:
         raise ValueError(f"Download exceeds limit: {path.name}")
     put_verified(path, data, expected)
