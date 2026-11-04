@@ -383,14 +383,18 @@ class MainWindow(
         if self.closing:
             QTimer.singleShot(0, self.close)
         elif self.pending_connect:
-            self.pending_connect = False
-            QTimer.singleShot(0, self.toggle)
+            QTimer.singleShot(0, self.connect_pending)
         elif (
             self.connected
             and self.network_checks_enabled
             and "connectivity" not in self.inspections
         ):
             QTimer.singleShot(0, self.check_connection)
+
+    def connect_pending(self):
+        if self.pending_connect and not self.closing:
+            self.pending_connect = False
+            self.toggle()
 
     def refresh_controls(self):
         if self.profile:
