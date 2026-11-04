@@ -1,0 +1,51 @@
+name: Windows release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate release version
+        shell: pwsh
+        run: |
+          $version = python -c 'from nodera import __version__; print(__version__)'
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") { throw 'Release tag must match nodera.__version__' }
+      - run: python -m venv .venv
+      - run: .venv\Scripts\python -m pip install -e ".[dev]"
+      - run: .venv\Scripts\python scripts/prepare_core.py
+      - run: .venv\Scripts\python -m ruff check .
+      - run: .venv\Scripts\python -m ruff format --check .
+      - run: .venv\Scripts\python -m pytest -q
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - name: Install installer compiler
+        run: choco install innosetup --version=6.5.4 --yes --no-progress
+      - run: .\scripts\build.ps1 -Installer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nodera-installer
+          path: dist/installers/*
+      - name: Create draft release for review
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $notes = "docs/releases/$env:GITHUB_REF_NAME.md"
+          $releaseArguments = @('release', 'create', $env:GITHUB_REF_NAME, '--draft', '--verify-tag', '--title', "Nodera $env:GITHUB_REF_NAME")
+          if (Test-Path -LiteralPath $notes) {
+            $releaseArguments += @('--notes-file', $notes)
+          } else {
+            $releaseArguments += '--generate-notes'
+          }
+          $releaseArguments += @(Get-ChildItem -LiteralPath dist/installers -File | ForEach-Object FullName)
+          & gh @releaseArguments
+          if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed' }

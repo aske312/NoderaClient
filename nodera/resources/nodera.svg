@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">312.net triangle mark</title>
+  <desc id="desc">Inverted triangular emblem with an upright triangle inside.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0c1b25"/>
+      <stop offset="1" stop-color="#050b11"/>
+    </linearGradient>
+    <linearGradient id="neon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#65e8df"/>
+      <stop offset="0.52" stop-color="#56d9e9"/>
+      <stop offset="1" stop-color="#728dff"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="13" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="48" y="48" width="928" height="928" rx="210" fill="url(#background)"/>
+  <path d="M170 220h684L512 850 170 220Z" fill="#56d9e90d" stroke="url(#neon)" stroke-width="34" stroke-linejoin="round" filter="url(#glow)"/>
+  <path d="m512 350 178 326H334l178-326Z" fill="#071019" stroke="url(#neon)" stroke-width="28" stroke-linejoin="round"/>
+</svg>

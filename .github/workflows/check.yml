@@ -1,0 +1,23 @@
+name: Windows checks
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m venv .venv
+      - run: .venv\Scripts\python -m pip install -e ".[dev]"
+      - run: .venv\Scripts\python scripts/prepare_core.py
+      - run: .venv\Scripts\python -m ruff check .
+      - run: .venv\Scripts\python -m ruff format --check .
+      - run: .venv\Scripts\python -m pytest -q
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - run: .\scripts\build.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nodera-windows
+          path: dist/builds/*/Nodera/

@@ -1,0 +1,5 @@
+Map: Natural Earth v5.1.2, public domain. Land and country label coordinates.
+https://www.naturalearthdata.com/about/terms-of-use/
+Flags: flag-icons, bundled from vpsController/public/flags, MIT, copyright (c) 2013 Panayiotis Lipiridis.
+https://github.com/lipis/flag-icons
+See flags-LICENSE.txt and flags-NOTICE.txt.

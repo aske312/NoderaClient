@@ -1,0 +1,5 @@
+Country flag SVG artwork: lipis/flag-icons
+https://github.com/lipis/flag-icons
+Source revision: ac7e0eb3259eb62aa6100c435607e2fe03896a97
+Files: flags/4x3/*.svg with two-letter codes; distributed unmodified.
+License: MIT; see LICENSE in this directory.

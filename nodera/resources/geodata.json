@@ -1,0 +1,38 @@
+{
+  "source": "https://github.com/MetaCubeX/meta-rules-dat",
+  "revision": "61f465401cfec731ba4abfd9a5abcee235fa0ebc",
+  "files": [
+    {
+      "filename": "Country.mmdb",
+      "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/61f465401cfec731ba4abfd9a5abcee235fa0ebc/country.mmdb",
+      "sha256": "f604d54eb3d5a6fdab9747c0c62f0b489134b6d94df9e9eb20f1c5e2a537dbfa"
+    },
+    {
+      "filename": "GeoIP.dat",
+      "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/61f465401cfec731ba4abfd9a5abcee235fa0ebc/geoip.dat",
+      "sha256": "06c1d50d0013af57ffe78c5af93f0dc6aa998890f3ee231393816f9117810c4a"
+    },
+    {
+      "filename": "GeoSite.dat",
+      "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/61f465401cfec731ba4abfd9a5abcee235fa0ebc/geosite.dat",
+      "sha256": "3fee9b84efce1ef142974a18b48b9b12d2cf8ccb8017dd4ec16e3906bcb7da69"
+    },
+    {
+      "filename": "ASN.mmdb",
+      "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/61f465401cfec731ba4abfd9a5abcee235fa0ebc/GeoLite2-ASN.mmdb",
+      "sha256": "3169b9ea7dad762f6837b95408dadc1173f47be33be2d83b6c90e67a57a7eb2e"
+    }
+  ],
+  "notices": [
+    {
+      "filename": "LICENSE",
+      "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/4178770badecb1b349fbcd62c737e0d7a2079729/LICENSE",
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    {
+      "filename": "UPSTREAM.md",
+      "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/4178770badecb1b349fbcd62c737e0d7a2079729/README.md",
+      "sha256": "f8331ea1270bab8df1be58c6bd36064eacb80b4c98d1a243266617d5b544dd4a"
+    }
+  ]
+}

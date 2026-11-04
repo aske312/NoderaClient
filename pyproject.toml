@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nodera-client"
+dynamic = ["version"]
+description = "Standalone Windows desktop client for Mihomo"
+requires-python = ">=3.12"
+dependencies = ["PySide6-Essentials>=6.8,<7", "httpx>=0.28,<0.29", "PyYAML>=6.0.2,<7"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "ruff>=0.9,<1", "pyinstaller>=6,<7"]
+
+[project.gui-scripts]
+nodera = "nodera.app:main"
+
+[tool.setuptools.packages.find]
+include = ["nodera*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "nodera.__version__"}
+
+[tool.setuptools.package-data]
+nodera = ["resources/*.json", "resources/*.txt", "resources/*.ico", "resources/*.svg", "resources/flags/*.svg", "resources/protocols/*.webp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--basetemp=.pytest_cache/tmp"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
