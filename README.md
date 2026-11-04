@@ -2,6 +2,12 @@
 
 Клиент Mihomo для Windows 10/11 x64. Python 3.12+, PySide6; ядро встроено.
 
+## Установка готового приложения
+
+[Скачать установщик Nodera v0.0.1 для Windows x64](https://github.com/aske312/NoderaClient/releases/download/v0.0.1/Nodera-Setup-0.0.1-x64.exe) · [Все релизы](https://github.com/aske312/NoderaClient/releases/latest)
+
+Запустите установщик и подтвердите запрос Windows. Python, Qt, Mihomo и геоданные уже входят в комплект; отдельно устанавливать зависимости не требуется. Контрольная сумма SHA-256 приложена к установщику на странице релиза.
+
 ## Запуск
 
 ```powershell
