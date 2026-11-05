@@ -30,6 +30,7 @@ a = Analysis(
     pathex=[str(root)],
     binaries=[],
     datas=[
+        (str(root / "build/licenses"), "licenses"),
         # Preserve the upstream executable byte-for-byte for runtime SHA-256 checks.
         (str(core / "mihomo.exe"), "mihomo"),
         (str(manifest), "nodera/resources"),

@@ -4,6 +4,7 @@ import hashlib
 import os
 import re
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -51,6 +52,8 @@ def check_release(current=__version__, transport=None, proxy=None):
             )
             if response.status_code == 404:
                 raise ClientError("В GitHub пока нет доступного стабильного релиза.")
+            if response.status_code in (403, 429):
+                raise ClientError("GitHub временно ограничил проверку обновлений. Повторите позже.")
             response.raise_for_status()
             data = response.json()
         tag = data["tag_name"]
@@ -120,7 +123,7 @@ def download_release(release, root: Path, transport=None, proxy=None, cancelled=
         temporary.unlink(missing_ok=True)
 
 
-def launch_installer(path, release):
+def launch_installer(path, release, *, resume=False):
     # Recheck at execution time, even if the file has been replaced after download.
     try:
         if path.stat().st_size != release.size:
@@ -128,6 +131,15 @@ def launch_installer(path, release):
         with path.open("rb") as stream:
             if hashlib.file_digest(stream, "sha256").hexdigest() != release.sha256:
                 raise ValueError
-        subprocess.Popen([str(path), "/NORESTART"], cwd=path.parent)
+        arguments = [
+            str(path),
+            "/SP-",
+            "/NORESTART",
+            "/NODERAUPDATE=1",
+            f"/NODERARESUME={int(resume)}",
+        ]
+        if getattr(sys, "frozen", False):
+            arguments.append(f"/DIR={Path(sys.executable).resolve().parent}")
+        subprocess.Popen(arguments, cwd=path.parent)
     except (OSError, ValueError) as exc:
         raise ClientError("Не удалось запустить проверенный установщик обновления.") from exc

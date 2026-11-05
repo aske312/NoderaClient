@@ -36,10 +36,36 @@ def test_stable_newer_release_download_and_execution_recheck(tmp_path, monkeypat
     monkeypatch.setattr("nodera.updater.subprocess.Popen", lambda *a, **kw: calls.append(a))
     launch_installer(path, release)
     assert len(calls) == 1
+    assert "/NODERAUPDATE=1" in calls[0][0]
+    assert "/NODERARESUME=0" in calls[0][0]
     path.write_bytes(b"tampered!")
     with pytest.raises(ClientError):
         launch_installer(path, release)
     assert len(calls) == 1
+
+
+def test_update_targets_running_installation_and_restores_connection(tmp_path, monkeypatch):
+    content = b"installer"
+    path = tmp_path / "Nodera-Setup.exe"
+    path.write_bytes(content)
+    release = Release("1.2.3", "https://github.com/test", hashlib.sha256(content).hexdigest(), 9)
+    executable = tmp_path / "Installed App" / "Nodera.exe"
+    monkeypatch.setattr("nodera.updater.sys.frozen", True, raising=False)
+    monkeypatch.setattr("nodera.updater.sys.executable", str(executable))
+    calls = []
+    monkeypatch.setattr("nodera.updater.subprocess.Popen", lambda *a, **kw: calls.append(a))
+    launch_installer(path, release, resume=True)
+    arguments = calls[0][0]
+    assert "/NODERARESUME=1" in arguments
+    assert f"/DIR={executable.parent}" in arguments
+    assert "/SILENT" not in arguments and "/VERYSILENT" not in arguments
+    assert "/NORESTART" in arguments
+
+
+@pytest.mark.parametrize("status", [403, 429])
+def test_rate_limit_is_explained(status):
+    with pytest.raises(ClientError, match="ограничил"):
+        check_release(transport=httpx.MockTransport(lambda _: httpx.Response(status)))
 
 
 @pytest.mark.parametrize("change", ["digest", "url", "size", "prerelease", "version"])

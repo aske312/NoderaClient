@@ -19,6 +19,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.release_tag || github.ref }}
+          fetch-depth: 0
+      - name: Validate release source
+        shell: pwsh
+        run: |
+          if ($env:RELEASE_TAG) {
+            if ($env:RELEASE_TAG -notmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
+              throw 'Release tag must use vMAJOR.MINOR.PATCH'
+            }
+            git show-ref --verify --quiet "refs/tags/$env:RELEASE_TAG"
+            if ($LASTEXITCODE -ne 0) { throw 'Release tag must already exist' }
+          } elseif ($env:GITHUB_REF -ne 'refs/heads/pro-win') {
+            throw 'Manual installer builds without a release tag must run from pro-win'
+          }
+          git fetch origin pro-win
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch the release branch' }
+          git merge-base --is-ancestor HEAD origin/pro-win
+          if ($LASTEXITCODE -ne 0) { throw 'Release commit must belong to pro-win; merge d-win first' }
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -42,19 +59,10 @@ jobs:
           $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
           if (-not (Test-Path -LiteralPath $compiler)) { throw 'Inno Setup 6.7+ must be preinstalled on the build runner' }
       - run: .\scripts\build.ps1 -Installer
-      - name: Build non-installing appearance preview
-        shell: pwsh
-        run: |
-          $metadata = Get-Content -Raw nodera/resources/build-info.json | ConvertFrom-Json
-          $source = Join-Path $pwd ('dist/builds/' + $metadata.artifact_id + '/Nodera')
-          $output = Join-Path $pwd 'dist/installer-preview'
-          $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
-          & $compiler /Q /DPreview ('/DAppVersion=' + $metadata.version) ('/DAppSource=' + $source) ('/DInstallerOutput=' + $output) packaging/Nodera.iss
-          if ($LASTEXITCODE -ne 0) { throw 'Installer preview compilation failed' }
       - uses: actions/upload-artifact@v4
         with:
           name: Nodera-installer-preview
-          path: dist/installer-preview/Nodera-Setup-Preview.exe
+          path: dist/preview/Nodera-Setup-Preview.exe
       - uses: actions/upload-artifact@v4
         with:
           name: Nodera-installer

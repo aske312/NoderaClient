@@ -26,6 +26,42 @@ def profile(name="A"):
     )
 
 
+def test_clean_install_has_no_profiles_and_never_fetches_subscription(tmp_path, monkeypatch):
+    def unexpected_fetch(*args, **kwargs):
+        pytest.fail("Clean install attempted to fetch a subscription")
+
+    monkeypatch.setattr("nodera.profiles_ui.fetch_profile", unexpected_fetch)
+    app = QApplication.instance() or QApplication([])
+    store = Store(tmp_path)
+    library = store.load_library()
+    assert library.profiles == [] and library.active is None
+    window = MainWindow(store, store.load_settings(), None, library)
+    try:
+        window.auto_update_profile()
+        window.poll()
+        assert window.profile_list.count() == 0
+        assert not window.power.isEnabled()
+        assert not window.connected and not window.pending_connect
+        assert not (tmp_path / "profiles.dpapi").exists()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_subscription_display_has_no_provider_badge(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    saved = profile("Personal")
+    window = MainWindow(Store(tmp_path), Settings(update_hours=0), saved)
+    try:
+        item = window.profile_list.item(0)
+        assert item.text().startswith("Personal\nMihomo ·")
+        assert item.toolTip() == "Personal\nПодписка Mihomo"
+        assert saved.url not in item.text() + item.toolTip()
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def wait(window, app):
     deadline = time.monotonic() + 6
     while (

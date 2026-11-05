@@ -105,6 +105,12 @@ class Store:
             migrated_mode = "follow_profile" in data
             if type(data.pop("follow_profile", False)) is not bool:
                 raise ValueError
+            migrated_tray = "tray_behavior_version" not in data
+            if migrated_tray:
+                if "close_to_tray" in data and type(data["close_to_tray"]) is not bool:
+                    raise ValueError
+                data["close_to_tray"] = True
+                data["tray_behavior_version"] = 1
             settings = Settings(**data)
             if (
                 not isinstance(settings.device_id, str)
@@ -124,6 +130,8 @@ class Store:
                 or type(settings.save_logs) is not bool
                 or type(settings.geo_auto) is not bool
                 or type(settings.close_to_tray) is not bool
+                or type(settings.tray_behavior_version) is not int
+                or settings.tray_behavior_version != 1
                 or settings.flow_poll_seconds not in (1, 2, 3, 5, 10)
                 or type(settings.flow_poll_seconds) is not int
                 or settings.flow_history_minutes not in (1, 5, 15, 30)
@@ -142,7 +150,7 @@ class Store:
                 or settings.ipv6_mode not in ("profile", "on", "off")
             ):
                 raise ValueError
-            if migrated_core or migrated_mode:
+            if migrated_core or migrated_mode or migrated_tray:
                 self.save_settings(settings)
             return settings
         except (ValueError, TypeError) as exc:

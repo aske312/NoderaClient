@@ -1,6 +1,8 @@
+import ctypes
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import httpx
 import pytest
@@ -67,7 +69,9 @@ def test_real_core_exposes_client_process_domain_and_traffic(tmp_path):
         monitor = FlowMonitor()
         monitor.update(snapshot["flows"])
         captured = next(row for row in monitor.rows() if row["host"] == "flow-capture.invalid")
-        assert captured["process"].lower() in {"python.exe", "pythonw.exe"}
+        image = ctypes.create_unicode_buffer(32768)
+        assert ctypes.windll.kernel32.GetModuleFileNameW(None, image, len(image))
+        assert captured["process"].lower() == Path(image.value).name.lower()
         assert captured["path"]
         assert captured["network"] == "TCP"
         assert captured["download"] > 0

@@ -9,6 +9,7 @@ dist/
 *.egg-info/
 *.spec
 !packaging/Nodera.spec
+!packaging/Installer.spec
 vendor/
 bin/*.exe
 bin/*.dll

@@ -52,6 +52,23 @@ def test_task_uses_current_user_interactive_highest_and_no_password():
     assert "-Password" not in script and "SYSTEM" not in script
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_startup_changes_are_verified_with_windows(monkeypatch, enabled):
+    operations = []
+
+    def run(operation):
+        operations.append(operation)
+        return enabled
+
+    monkeypatch.setattr(autostart, "run_operation", run)
+    assert actual_set_enabled(enabled) is enabled
+    assert operations == ["enable" if enabled else "disable", "query"]
+
+    monkeypatch.setattr(autostart, "run_operation", lambda _: not enabled)
+    with pytest.raises(ClientError, match="не подтвердила"):
+        actual_set_enabled(enabled)
+
+
 def test_installer_commands_report_errors_without_opening_application(monkeypatch):
     from nodera import app
 

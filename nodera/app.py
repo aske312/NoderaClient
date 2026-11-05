@@ -32,6 +32,7 @@ def main() -> int:
         return command_result
     set_app_identity()
     app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("Nodera")
     app.setOrganizationName("NoderaClient")
     app.setStyle("Fusion")

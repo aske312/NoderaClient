@@ -102,7 +102,10 @@ def is_enabled():
 
 
 def set_enabled(enabled):
-    return run_operation("enable" if enabled else "disable")
+    result = run_operation("enable" if enabled else "disable")
+    if run_operation("query") != enabled:
+        raise ClientError("Windows не подтвердила изменение автозапуска Nodera.")
+    return result
 
 
 def handle_command(arguments):

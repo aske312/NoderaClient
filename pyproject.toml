@@ -1,11 +1,13 @@
 [build-system]
-requires = ["setuptools>=75"]
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "nodera-client"
 dynamic = ["version"]
 description = "Standalone Windows desktop client for Mihomo"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = ["PySide6-Essentials>=6.8,<7", "httpx>=0.28,<0.29", "PyYAML>=6.0.2,<7"]
 

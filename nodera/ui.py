@@ -1,4 +1,5 @@
 import os
+import sys
 import threading
 import time
 import traceback
@@ -240,6 +241,11 @@ class MainWindow(
         self.subscription_timer.setInterval(60000)
         self.subscription_timer.timeout.connect(self.auto_update_profile)
         self.subscription_timer.start()
+        if getattr(sys, "frozen", False):
+            self.app_update_timer = QTimer(self)
+            self.app_update_timer.setSingleShot(True)
+            self.app_update_timer.timeout.connect(self.check_app_updates)
+            self.app_update_timer.start(5000)
         QTimer.singleShot(1000, self.auto_update_profile)
         self.client_location_timer = QTimer(self)
         self.client_location_timer.setSingleShot(True)

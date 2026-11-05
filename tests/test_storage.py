@@ -12,6 +12,25 @@ def test_device_identity_survives_restart(tmp_path):
     assert store.load_settings().device_id == Store(tmp_path).load_settings().device_id
 
 
+def test_close_to_tray_is_enabled_for_new_and_migrated_settings(tmp_path):
+    assert Store(tmp_path / "new").load_settings().close_to_tray
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"device_id": "existing", "close_to_tray": False}))
+    store = Store(tmp_path)
+    migrated = store.load_settings()
+    assert migrated.close_to_tray and migrated.tray_behavior_version == 1
+    assert json.loads(path.read_text())["close_to_tray"] is True
+    migrated.close_to_tray = False
+    store.save_settings(migrated)
+    assert not Store(tmp_path).load_settings().close_to_tray
+
+
+def test_invalid_legacy_tray_setting_is_not_silently_overwritten(tmp_path):
+    (tmp_path / "settings.json").write_text(json.dumps({"close_to_tray": "invalid"}))
+    with pytest.raises(ClientError):
+        Store(tmp_path).load_settings()
+
+
 def test_legacy_local_mode_preserved_and_new_install_uses_vpn(tmp_path):
     path = tmp_path / "settings.json"
     path.write_text(

@@ -1,0 +1,28 @@
+NODERA — LICENSE AND TERMS OF USE
+Revision: 5 November 2026
+
+1. FREE SOFTWARE LICENSE
+Original Nodera code is licensed under the MIT License. Use, copying, modification and redistribution, including commercial use, are permitted subject to preserving the copyright notice and license text. The complete MIT License is supplied in LICENSE. Source: https://github.com/aske312/NoderaClient.
+
+2. AS-IS DISTRIBUTION
+To the maximum extent permitted by applicable law, the software is provided "as is" and "as available", without any express or implied warranties, including merchantability, fitness for a particular purpose, noninfringement, accuracy, compatibility, security or freedom from defects.
+The developers and copyright holders do not guarantee uninterrupted operation, any particular speed, availability of external resources, preservation of data, anonymity or protection against every threat. The product name and description are not a promise of absolute security or any particular result.
+
+3. LIMITATION OF LIABILITY
+To the maximum extent permitted by applicable law, authors, contributors, copyright holders and distributors shall not be liable for any claim, damages or other liability arising from the software, its use or inability to use it, whether in contract, tort or otherwise.
+This includes direct, indirect, incidental, special and consequential damage, loss of data, profit, revenue or goodwill, business interruption, recovery or replacement costs, network configuration failures and consequences of third-party actions, even if advised that such consequences were possible.
+Nothing excludes or limits liability or user rights that applicable law does not allow to be excluded or limited. An unenforceable provision applies only to the legally permissible extent; the remaining provisions continue to apply.
+
+4. EXTERNAL SERVICES AND CONFIGURATION
+Nodera is client software. Its distribution does not supply a server, account, subscription or communications service contract. Users select their own providers, profiles and settings and assess their reliability, legality, cost and suitability.
+The developers do not control third-party services, their content, rules or handling of data and do not guarantee their availability. Users are encouraged to keep backups, check settings and use only resources they are entitled to access. This section describes the product and does not impose additional restrictions on the free software license.
+
+5. SUPPORT AND CHANGES
+Unless separately agreed in binding written terms, free distribution does not create an obligation to provide support, updates, fixes, compatibility with future systems or maintenance of external services. These terms do not displace obligations imposed by applicable law.
+
+6. THIRD-PARTY COMPONENTS
+MIT covers original Nodera code and does not replace component licenses. Mihomo is distributed separately under GPL-3.0; Qt, PySide6 and Shiboken under applicable LGPL/GPL terms; other libraries and resources under their respective licenses. License texts, notices and source information are provided in the licenses and third_party directories.
+Nothing here restricts copying, modification, redistribution, library replacement or investigation permitted by the relevant free software licenses. A component's own license prevails for that component in case of conflict.
+
+7. ACKNOWLEDGEMENT
+By clicking "Accept and install" or explicitly confirming repair under the Nodera license, you acknowledge and accept these terms, the warranty disclaimer and limitation of liability to the extent permitted by applicable law. This document explains the MIT License and does not impose additional restrictions on rights granted by MIT or component licenses. If you disagree, close setup.

@@ -141,7 +141,7 @@ class WorkbenchMixin:
         column = QVBoxLayout()
         column.setSpacing(2)
         column.addWidget(label("Nodera", "dashboardProfile"))
-        column.addWidget(label("VPN-клиент для Windows · Proxy и TUN", "muted"))
+        column.addWidget(label("Клиент для безопасных подключений", "muted"))
         row.addLayout(column, 1)
         layout.addLayout(row)
         form = QFormLayout()
@@ -182,12 +182,13 @@ class WorkbenchMixin:
             form.addRow(caption, value)
         content.addLayout(form)
         self.available_release = None
+        self.downloaded_update = None
         self.app_update_status = label("Обновления из GitHub Releases", "muted", True)
         content.addWidget(self.app_update_status)
         updates = QHBoxLayout()
         self.app_update_check = QPushButton("Проверить обновления")
         self.app_update_check.clicked.connect(self.check_app_updates)
-        self.app_update_install = QPushButton("Скачать и установить")
+        self.app_update_install = QPushButton("Загрузить обновление")
         self.app_update_install.hide()
         self.app_update_install.clicked.connect(self.install_app_update)
         updates.addWidget(self.app_update_check)
@@ -204,26 +205,41 @@ class WorkbenchMixin:
             else None
         )
 
+    def schedule_app_update_check(self, milliseconds):
+        timer = getattr(self, "app_update_timer", None)
+        if timer is not None and not self.closing:
+            timer.start(milliseconds)
+
     def check_app_updates(self):
-        if self.task or self.closing:
+        if self.closing:
             return
+        if self.task or {"app-update", "app-download"}.intersection(self.inspections):
+            self.schedule_app_update_check(60000)
+            return
+        self.available_release = None
+        self.downloaded_update = None
+        self.app_update_install.setText("Загрузить обновление")
+        self.app_update_install.hide()
         self.app_update_check.setEnabled(False)
         self.app_update_install.setEnabled(False)
         self.app_update_status.setText("Проверка GitHub…")
         proxy = self.update_proxy()
 
         def checked(release):
+            self.schedule_app_update_check(6 * 60 * 60 * 1000)
             self.available_release = release
             self.app_update_check.setEnabled(True)
             self.app_update_install.setEnabled(True)
             self.app_update_install.setVisible(release is not None)
             self.app_update_status.setText(
-                f"Доступна версия {release.version}. Для установки Nodera завершит работу."
+                f"Доступна версия {release.version}. Обновление можно загрузить в фоне "
+                "и установить в удобное время."
                 if release
-                else "Установлена актуальная версия"
+                else f"Установлена актуальная версия {__version__}"
             )
 
         def failed(message):
+            self.schedule_app_update_check(30 * 60 * 1000)
             self.app_update_check.setEnabled(True)
             self.app_update_install.setEnabled(self.available_release is not None)
             self.app_update_status.setText(message)
@@ -237,27 +253,48 @@ class WorkbenchMixin:
         )
 
     def install_app_update(self):
-        if self.task or self.closing or not self.available_release:
+        if (
+            self.task
+            or self.closing
+            or not self.available_release
+            or {"app-update", "app-download"}.intersection(self.inspections)
+        ):
             return
         release, proxy = self.available_release, self.update_proxy()
+        if self.downloaded_update is not None:
+            try:
+                updater.launch_installer(self.downloaded_update, release, resume=self.connected)
+            except ClientError as exc:
+                self.downloaded_update = None
+                self.app_update_install.setText("Загрузить повторно")
+                self.app_update_status.setText(str(exc))
+                return
+            self.app_update_status.setText(
+                "Установщик открыт. Клиент продолжит работу до подтверждения установки. "
+                "После установки нажмите «Открыть Nodera»; подключение будет восстановлено."
+            )
+            return
+        self.app_update_check.setEnabled(False)
         self.app_update_install.setEnabled(False)
         self.app_update_status.setText("Загрузка и проверка установщика…")
 
         def downloaded(path):
-            if self.closing:
-                return
-            try:
-                updater.launch_installer(path, release)
-            except ClientError as exc:
-                failed(str(exc))
-                return
-            self.exit_app()
+            self.downloaded_update = path
+            self.app_update_check.setEnabled(True)
+            self.app_update_install.setEnabled(True)
+            self.app_update_install.setText("Установить обновление")
+            self.app_update_status.setText(
+                f"Версия {release.version} загружена и проверена. Можно продолжать работу. "
+                "При установке потребуется перезапуск клиента и короткий разрыв подключения."
+            )
 
         def failed(message):
+            self.app_update_check.setEnabled(True)
             self.app_update_install.setEnabled(True)
             self.app_update_status.setText(message)
 
-        self.run_task(
+        self.start_inspection(
+            "app-download",
             lambda: updater.download_release(
                 release,
                 self.store.root,
@@ -266,6 +303,7 @@ class WorkbenchMixin:
             ),
             downloaded,
             failed,
+            session_bound=False,
         )
 
     def build_servers(self):

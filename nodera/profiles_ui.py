@@ -3,7 +3,6 @@
 import time
 from dataclasses import replace
 from datetime import datetime
-from urllib.parse import urlsplit
 
 from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtWidgets import (
@@ -19,14 +18,6 @@ from nodera.dialogs import SubscriptionDialog
 from nodera.models import ClientError, ProfileLibrary
 from nodera.subscription import fetch_profile
 from nodera.widgets import label
-
-
-def subscription_source(url):
-    try:
-        host = (urlsplit(url).hostname or "").lower().rstrip(".")
-    except ValueError:
-        return "Источник не определён"
-    return "PRO" if host == "312node.net" or host.endswith(".312node.net") else "Mihomo"
 
 
 class ProfilesMixin:
@@ -126,21 +117,13 @@ class ProfilesMixin:
                 if 2 <= count % 10 <= 4 and not 12 <= count % 100 <= 14
                 else "серверов"
             )
-            source = subscription_source(profile.url)
-            text = f"{profile.name}\n{source} · {count} {noun}"
+            text = f"{profile.name}\nMihomo · {count} {noun}"
             if profile.id == self.library.active_id:
                 text += " · Текущая"
             item = self.profile_list.item(index)
             if item.text() != text:
                 item.setText(text)
-            item.setToolTip(
-                profile.name
-                + (
-                    "\nPRO: источник определён по домену 312node.net"
-                    if source == "PRO"
-                    else "\nПодписка Mihomo"
-                )
-            )
+            item.setToolTip(profile.name + "\nПодписка Mihomo")
             self.profile_selector.setItemText(index, profile.name)
             if profile.id == self.library.active_id:
                 self.profile_list.setCurrentItem(item)

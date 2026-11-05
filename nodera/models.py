@@ -56,7 +56,8 @@ class Settings:
     tun_stack: str = "profile"
     tun_mtu: int = 0
     ipv6_mode: str = "profile"
-    close_to_tray: bool = False
+    close_to_tray: bool = True
+    tray_behavior_version: int = 1
     flow_poll_seconds: int = 1
     flow_history_minutes: int = 5
     save_connection_logs: bool = True

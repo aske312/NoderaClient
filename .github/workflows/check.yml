@@ -1,8 +1,20 @@
 name: Windows checks
-on: [push, pull_request]
+on:
+  push:
+    branches: [d-win, pro-win]
+  pull_request:
+    branches: [d-win, pro-win]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-checks-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   check:
     runs-on: windows-latest
+    env:
+      FULL_CHECKS: ${{ github.ref == 'refs/heads/pro-win' || github.base_ref == 'pro-win' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -12,13 +24,18 @@ jobs:
       - run: .venv\Scripts\python -m pip install -e ".[dev]"
       - run: .venv\Scripts\python scripts/prepare_core.py
       - run: .venv\Scripts\python -m ruff check .
+      - name: Check Python syntax
+        if: env.FULL_CHECKS != 'true'
+        run: .venv\Scripts\python -m compileall -q nodera scripts main.py
       - run: .venv\Scripts\python -m ruff format --check .
+        if: env.FULL_CHECKS == 'true'
       - run: .venv\Scripts\python -m pytest -vv -x --durations=10
+        if: env.FULL_CHECKS == 'true'
         timeout-minutes: 10
         env:
           QT_QPA_PLATFORM: offscreen
       - run: .\scripts\build.ps1
       - uses: actions/upload-artifact@v4
         with:
-          name: Nodera-windows
+          name: Nodera-test-${{ github.sha }}
           path: dist/builds/*/Nodera/

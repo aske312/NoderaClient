@@ -13,6 +13,7 @@ from nodera.models import ClientError, Profile, Settings
 from nodera.rule_editor import make_rule
 from nodera.storage import Store
 from nodera.ui import MainWindow
+from nodera.updater import Release
 
 
 def wait(app, predicate):
@@ -21,6 +22,143 @@ def wait(app, predicate):
         app.processEvents()
         QTest.qWait(5)
     assert predicate()
+
+
+@pytest.mark.parametrize("connected", [False, True])
+def test_app_update_download_and_installer_wait_for_user_without_closing_client(
+    tmp_path, monkeypatch, connected
+):
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Store(tmp_path), Settings(update_hours=0), None)
+    window.timer.stop()
+    release = Release("1.2.3", "https://github.com/test", "a" * 64, 9)
+    window.available_release = release
+    window.connected = connected
+    calls = []
+
+    def download(*args, **kwargs):
+        assert not window.closing
+        calls.append("download")
+        return tmp_path / "installer.exe"
+
+    def launch(path, downloaded, *, resume):
+        assert downloaded == release and resume == connected
+        calls.append("launch")
+
+    monkeypatch.setattr("nodera.workbench.updater.download_release", download)
+    monkeypatch.setattr("nodera.workbench.updater.launch_installer", launch)
+    monkeypatch.setattr(window, "exit_app", lambda: calls.append("exit"))
+    try:
+        window.install_app_update()
+        assert window.task is None
+        wait(app, lambda: not window.inspections)
+        assert calls == ["download"]
+        assert window.downloaded_update == tmp_path / "installer.exe"
+        assert window.app_update_install.text() == "Установить обновление"
+        window.install_app_update()
+        assert calls == ["download", "launch"]
+        assert not window.closing and window.connected == connected
+    finally:
+        window.connected = False
+        window.close()
+        app.processEvents()
+
+
+def test_failed_update_launch_keeps_client_open_and_allows_retry(tmp_path, monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Store(tmp_path), Settings(update_hours=0), None)
+    window.timer.stop()
+    window.available_release = Release("1.2.3", "https://github.com/test", "a" * 64, 9)
+    monkeypatch.setattr(
+        "nodera.workbench.updater.download_release", lambda *a, **kw: tmp_path / "installer.exe"
+    )
+
+    def failed(*args, **kwargs):
+        raise ClientError("Installer failed")
+
+    monkeypatch.setattr("nodera.workbench.updater.launch_installer", failed)
+    monkeypatch.setattr(window, "exit_app", lambda: pytest.fail("Failed update closed the client"))
+    try:
+        window.install_app_update()
+        wait(app, lambda: not window.inspections)
+        window.install_app_update()
+        assert not window.closing
+        assert window.downloaded_update is None
+        assert window.app_update_check.isEnabled() and window.app_update_install.isEnabled()
+        assert window.app_update_status.text() == "Installer failed"
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_background_download_survives_connection_change_and_blocks_duplicate(tmp_path, monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Store(tmp_path), Settings(update_hours=0, geo_auto=False), None)
+    window.timer.stop()
+    window.available_release = Release("1.2.3", "https://github.com/test", "a" * 64, 9)
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+
+    def download(*args, **kwargs):
+        calls.append(True)
+        entered.set()
+        assert release.wait(3)
+        return tmp_path / "installer.exe"
+
+    monkeypatch.setattr("nodera.workbench.updater.download_release", download)
+    try:
+        window.install_app_update()
+        wait(app, entered.is_set)
+        assert window.task is None
+        window.session_generation += 1
+        window.install_app_update()
+        window.check_app_updates()
+        assert window.available_release is not None
+        release.set()
+        wait(app, lambda: not window.inspections)
+        assert calls == [True]
+        assert window.downloaded_update == tmp_path / "installer.exe"
+    finally:
+        release.set()
+        wait(app, lambda: not window.inspections)
+        window.close()
+        app.processEvents()
+
+
+def test_automatic_update_retries_busy_startup_and_network_failure(tmp_path, monkeypatch):
+    from PySide6.QtCore import QTimer
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Store(tmp_path), Settings(update_hours=0, geo_auto=False), None)
+    window.timer.stop()
+    window.app_update_timer = QTimer(window)
+    window.app_update_timer.setSingleShot(True)
+    calls = []
+
+    def check(**kwargs):
+        calls.append(True)
+        if len(calls) == 1:
+            raise ClientError("Offline")
+        return None
+
+    monkeypatch.setattr("nodera.workbench.updater.check_release", check)
+    try:
+        window.task = object()
+        window.check_app_updates()
+        assert not calls and window.app_update_timer.interval() == 60000
+        window.task = None
+        window.check_app_updates()
+        wait(app, lambda: not window.inspections)
+        assert window.app_update_timer.interval() == 30 * 60 * 1000
+        assert window.app_update_status.text() == "Offline"
+        window.check_app_updates()
+        wait(app, lambda: not window.inspections)
+        assert window.app_update_timer.interval() == 6 * 60 * 60 * 1000
+        assert "актуальная" in window.app_update_status.text()
+    finally:
+        window.task = None
+        window.close()
+        app.processEvents()
 
 
 def test_background_poll_preserves_selection_and_does_not_lock_controls(tmp_path, monkeypatch):
@@ -148,6 +286,8 @@ def test_connection_state_reflects_network_check_and_survives_api_poll(
             raise ClientError("Network unavailable")
 
     monkeypatch.setattr(window.core, "check_connectivity", probe)
+    # This test simulates a connection without a core; do not probe real API ports.
+    monkeypatch.setattr(window, "test_group", lambda: None)
     monkeypatch.setattr(
         window.core,
         "status",
