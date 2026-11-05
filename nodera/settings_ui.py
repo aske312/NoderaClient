@@ -349,13 +349,6 @@ def detect_point(self, automatic=False):
     if self.closing or "client-location" in self.inspections:
         return
     original_point = dict(self.settings.client_point)
-    if automatic:
-        settings = replace(self.settings, client_location_attempted=True)
-        try:
-            self.store.save_settings(settings)
-        except OSError:
-            return
-        self.settings = settings
     self.detect_client_button.setEnabled(False)
     self.client_point_result.setText("Определение через физический сетевой интерфейс…")
 
@@ -375,7 +368,12 @@ def detect_point(self, automatic=False):
             "Приблизительно: " + point["name"] + ". Сохраните настройки для отображения на карте."
         )
         if automatic:
-            settings = replace(self.settings, client_point=client_point_value(self))
+            settings = replace(
+                self.settings, client_point=client_point_value(self), client_location_attempted=True
+            )
+            # Show a successful lookup even if saving to disk is temporarily unavailable.
+            self.settings = settings
+            self.refresh_dashboard()
             try:
                 self.store.save_settings(settings)
             except OSError:
@@ -383,13 +381,13 @@ def detect_point(self, automatic=False):
                     "Не удалось сохранить точку клиента. Нажмите «Сохранить»."
                 )
                 return
-            self.settings = settings
-            self.refresh_dashboard()
             self.client_point_result.setText("По IP: " + point["name"] + " · Сохранено")
 
     def failed(message):
         self.detect_client_button.setEnabled(True)
         self.client_point_result.setText(message)
+        if automatic and not self.closing and not self.settings.client_point:
+            self.client_location_timer.start(60000)
 
     self.start_inspection(
         "client-location", detect_client_location, done, failed, session_bound=False

@@ -2,7 +2,7 @@
 
 import math
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QIcon,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate,
     QStyleOptionButton,
     QStylePainter,
+    QToolTip,
     QVBoxLayout,
 )
 
@@ -136,6 +137,8 @@ def line_icon(kind: str) -> QIcon:
                 ]
             )
         )
+    elif kind == "chevron-up":
+        painter.drawPolyline(QPolygonF([QPointF(6, 15), QPointF(12, 9), QPointF(18, 15)]))
     elif kind in {"collapse", "expand"}:
         painter.drawRoundedRect(3, 4, 18, 16, 3, 3)
         painter.drawLine(16, 5, 16, 19)
@@ -291,7 +294,7 @@ class RouteButton(QPushButton):
 
 class NodeDelegate(QStyledItemDelegate):
     def sizeHint(self, option, index):
-        return QSize(max(200, self.parent().viewport().width() - 2), 58)
+        return QSize(max(200, self.parent().viewport().width() - 2), 54)
 
     def paint(self, painter, option, index):
         from nodera.server_assets import flag_pixmap, protocol_pixmap
@@ -301,18 +304,43 @@ class NodeDelegate(QStyledItemDelegate):
         rect = QRectF(option.rect).adjusted(1, 1, -2, -2)
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         data = index.data(Qt.ItemDataRole.UserRole + 1) or {}
+        hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
+        painter.fillRect(
+            rect,
+            QColor(
+                "#173630"
+                if data.get("forced")
+                else "#142f39"
+                if selected or hovered
+                else "#0c1e28"
+                if index.row() % 2 == 0
+                else "#0e222b"
+            ),
+        )
+        painter.setPen(QPen(QColor("#1b3440"), 1))
+        painter.drawLine(rect.bottomLeft(), rect.bottomRight())
+        center = QPointF(rect.left() + 18, rect.center().y())
+        star = QPolygonF()
+        for step in range(10):
+            angle = -math.pi / 2 + step * math.pi / 5
+            radius = 8 if step % 2 == 0 else 3.6
+            star.append(center + QPointF(math.cos(angle) * radius, math.sin(angle) * radius))
+        enabled = self.parent().pin_enabled and (
+            data.get("forced") or data.get("can_force") and not data.get("frozen")
+        )
         painter.setPen(
             QPen(
-                QColor("#69c8aa" if data.get("forced") else "#40717b" if selected else "#1b3440"), 1
+                QColor("#e4c77c" if data.get("forced") else "#78959f" if enabled else "#354c57"),
+                1.3,
             )
         )
-        painter.setBrush(QColor("#142f39" if selected else "#0c1e28"))
-        painter.drawRoundedRect(rect, 7, 7)
+        painter.setBrush(QColor("#e4c77c") if data.get("forced") else Qt.BrushStyle.NoBrush)
+        painter.drawPolygon(star)
         icon = protocol_pixmap(data.get("type", ""))
         painter.drawPixmap(
-            QRectF(rect.left() + 10, rect.top() + 12, 30, 30), icon, QRectF(icon.rect())
+            QRectF(rect.left() + 38, rect.top() + 11, 28, 28), icon, QRectF(icon.rect())
         )
-        left = rect.left() + 50
+        left = rect.left() + 76
         font = option.font
         font.setPixelSize(12)
         font.setBold(True)
@@ -320,7 +348,7 @@ class NodeDelegate(QStyledItemDelegate):
         painter.setPen(QColor("#e2edf4"))
         title = str(index.data(Qt.ItemDataRole.UserRole) or "")
         title = painter.fontMetrics().elidedText(
-            title, Qt.TextElideMode.ElideRight, int(rect.width() - 155)
+            title, Qt.TextElideMode.ElideRight, max(0, int(rect.width() - 181))
         )
         painter.drawText(QPointF(left, rect.top() + 21), title)
         delay = data.get("delay")
@@ -364,13 +392,15 @@ class NodeDelegate(QStyledItemDelegate):
         if endpoint:
             text += " · " + endpoint
         text = painter.fontMetrics().elidedText(
-            text, Qt.TextElideMode.ElideRight, int(rect.width() - flag_width - 72)
+            text, Qt.TextElideMode.ElideRight, max(0, int(rect.width() - flag_width - 98))
         )
         painter.drawText(QPointF(left, rect.top() + 42), text)
         painter.restore()
 
 
 class NodeList(QListWidget):
+    pin_requested = Signal(str)
+
     def __init__(self):
         super().__init__()
         self.setObjectName("nodeCards")
@@ -381,7 +411,72 @@ class NodeList(QListWidget):
         self.setUniformItemSizes(True)
         self.setMinimumHeight(130)
         self.setMouseTracking(True)
+        self.pin_enabled = True
+        self._pressed_pin = None
+
+    def pin_rect(self, item):
+        rect = self.visualItemRect(item)
+        return QRectF(rect.left() + 4, rect.top(), 30, rect.height())
+
+    def request_pin(self, item):
+        data = item.data(Qt.ItemDataRole.UserRole + 1) or {}
+        if self.pin_enabled and (
+            data.get("forced") or data.get("can_force") and not data.get("frozen")
+        ):
+            self.setCurrentItem(item)
+            self.pin_requested.emit(item.data(Qt.ItemDataRole.UserRole))
+
+    def mousePressEvent(self, event):
+        item = self.itemAt(event.position().toPoint())
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and item
+            and self.pin_rect(item).contains(event.position())
+        ):
+            self._pressed_pin = item.data(Qt.ItemDataRole.UserRole)
+            self.setCurrentItem(item)
+            event.accept()
+            return
+        self._pressed_pin = None
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        member, self._pressed_pin = self._pressed_pin, None
+        if member is not None and event.button() == Qt.MouseButton.LeftButton:
+            item = self.itemAt(event.position().toPoint())
+            if (
+                item
+                and item.data(Qt.ItemDataRole.UserRole) == member
+                and self.pin_rect(item).contains(event.position())
+            ):
+                self.request_pin(item)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Space and self.currentItem():
+            self.request_pin(self.currentItem())
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def viewportEvent(self, event):
+        if event.type() == QEvent.Type.ToolTip:
+            item = self.itemAt(event.pos())
+            if item and self.pin_rect(item).contains(QPointF(event.pos())):
+                data = item.data(Qt.ItemDataRole.UserRole + 1) or {}
+                text = (
+                    "Вернуть стратегию подписки"
+                    if data.get("forced")
+                    else "Закрепить маршрут независимо от стратегии · Пробел"
+                )
+                if data.get("frozen") and not data.get("forced"):
+                    text = "Маршрут на паузе. Дождитесь успешной проверки."
+                QToolTip.showText(event.globalPos(), text, self)
+                return True
+        return super().viewportEvent(event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.setGridSize(QSize(max(200, self.viewport().width() - 2), 58))
+        self.setGridSize(QSize(max(200, self.viewport().width() - 2), 54))

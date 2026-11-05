@@ -9,20 +9,16 @@ from datetime import datetime
 from urllib.parse import urlsplit
 
 from PySide6.QtCore import (
-    QEasingCurve,
     QSignalBlocker,
-    QSize,
     Qt,
     QThread,
     QTimer,
-    QVariantAnimation,
     Signal,
 )
-from PySide6.QtGui import QAction, QKeySequence, QShortcut
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
-    QHBoxLayout,
     QLayout,
     QListWidgetItem,
     QMainWindow,
@@ -31,7 +27,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QStackedWidget,
     QSystemTrayIcon,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -46,6 +41,7 @@ from nodera.geolocation import GeoClient
 from nodera.journal import Journal
 from nodera.locations import country
 from nodera.models import ClientError
+from nodera.navigation import NavigationDock
 from nodera.presentation import PresentationMixin
 from nodera.profile_view import effective_tun
 from nodera.profile_view import format_bytes as size_text
@@ -53,8 +49,7 @@ from nodera.profiles_ui import ProfilesMixin
 from nodera.routes import route_for_node
 from nodera.server_assets import node_countries
 from nodera.theme import STYLE as STYLE
-from nodera.versioning import version_text
-from nodera.widgets import app_icon, label, line_icon
+from nodera.widgets import app_icon, label
 from nodera.workbench import WorkbenchMixin
 from nodera.world_map import WorldCanvas
 
@@ -128,86 +123,22 @@ class MainWindow(
         self.update_retry_at = 0.0
         self.setWindowTitle("Nodera")
         self.setWindowIcon(app_icon())
-        self.resize(940, 660)
+        self.resize(1040, 720)
         self.setMinimumSize(840, 620)
         root = QWidget()
         self.configure_shell(root)
-        horizontal = QHBoxLayout(root)
-        horizontal.setContentsMargins(0, 0, 0, 0)
-        horizontal.setSpacing(0)
-        self.sidebar = QFrame()
-        self.sidebar.setObjectName("sidebar")
-        self.sidebar_collapsed = settings.sidebar_collapsed
-        side = QVBoxLayout(self.sidebar)
-        side.setContentsMargins(4, 8, 4, 8)
-        side.setSpacing(4)
-        self.sidebar_toggle = QToolButton()
-        self.sidebar_toggle.setObjectName("menuToggle")
-        self.sidebar_toggle.setIconSize(QSize(18, 18))
-        self.sidebar_toggle.setFixedSize(28, 28)
-        self.sidebar_toggle.clicked.connect(self.toggle_sidebar)
+        content = QVBoxLayout(root)
+        content.setContentsMargins(12, 0, 12, 14)
+        content.setSpacing(12)
         self.stack = QStackedWidget()
-        self.nav = {}
-        self.nav_titles = {}
-        for index, text in (
-            (0, "Главная"),
-            (4, "Серверы"),
-            (1, "Подписки"),
-            (6, "Правила"),
-            (8, "Соединения"),
-            (2, "Настройки"),
-            (7, "Приложение"),
-        ):
-            if index == 2:
-                side.addSpacing(8)
-            button = QToolButton()
-            button.setText(text)
-            button.setObjectName("nav")
-            button.setFixedHeight(36)
-            button.setIconSize(QSize(16, 16))
-            button.setToolTip(text)
-            button.setAccessibleName(text)
-            button.setIcon(
-                line_icon(
-                    {
-                        0: "home",
-                        1: "profile",
-                        2: "settings",
-                        3: "events",
-                        4: "servers",
-                        5: "diagnostics",
-                        6: "routes",
-                        7: "info",
-                        8: "connections",
-                    }[index]
-                )
-            )
-            button.setCheckable(True)
-            button.clicked.connect(lambda checked=False, i=index: self.navigate(i))
-            self.nav[index] = button
-            self.nav_titles[index] = text
-            side.addWidget(button)
-        side.addStretch()
-        self.sidebar_status = label("Не подключено", "muted")
-        self.sidebar_status.hide()
-        self.sidebar_version = label(version_text(), "railDetail", True)
-        self.sidebar_version.setToolTip(version_text())
-        side.addWidget(self.sidebar_version)
-        side.addWidget(self.sidebar_toggle, 0, Qt.AlignmentFlag.AlignRight)
-        horizontal.setContentsMargins(12, 0, 12, 12)
-        horizontal.setSpacing(12)
-        horizontal.addWidget(self.stack, 1)
-        horizontal.addWidget(self.sidebar)
-        self.sidebar_animation = QVariantAnimation(self)
-        self.sidebar_animation.setDuration(180)
-        self.sidebar_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self.sidebar_animation.valueChanged.connect(
-            lambda width: self.sidebar.setFixedWidth(int(width))
-        )
-        self.sidebar_animation.finished.connect(self.finish_sidebar_animation)
-        self.apply_sidebar_state()
-        self.sidebar_shortcut = QShortcut(QKeySequence("Ctrl+B"), self)
-        self.sidebar_shortcut.activated.connect(self.toggle_sidebar)
+        content.addWidget(self.stack, 1)
+        self.navigation = NavigationDock(self)
+        self.navigation.selected.connect(self.navigate)
+        self.nav = self.navigation.buttons
+        self.navigation_status = label("Не подключено", "muted")
+        self.navigation_status.setParent(self)
+        self.navigation_status.hide()
+        content.addWidget(self.navigation, 0, Qt.AlignmentFlag.AlignHCenter)
         self.build_connection()
         self.build_profile()
         self.build_settings()
@@ -273,60 +204,6 @@ class MainWindow(
             self.tray.show()
         self.refresh_controls()
 
-    def apply_sidebar_state(self):
-        self.sidebar.setFixedWidth(42 if self.sidebar_collapsed else 144)
-        self.sidebar.setProperty("collapsed", self.sidebar_collapsed)
-        self.sidebar.style().unpolish(self.sidebar)
-        self.sidebar.style().polish(self.sidebar)
-        self.sidebar_toggle.setIcon(line_icon("expand" if self.sidebar_collapsed else "collapse"))
-        self.sidebar_toggle.setText("")
-        self.sidebar_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        action = "Развернуть меню" if self.sidebar_collapsed else "Свернуть меню"
-        self.sidebar_toggle.setAccessibleName(action)
-        self.sidebar_toggle.setToolTip(action + " · Ctrl+B")
-        for index, button in self.nav.items():
-            button.setText("" if self.sidebar_collapsed else self.nav_titles[index])
-            button.setToolButtonStyle(
-                Qt.ToolButtonStyle.ToolButtonIconOnly
-                if self.sidebar_collapsed
-                else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
-            )
-            button.setFixedSize(
-                34 if self.sidebar_collapsed else 128, 34 if self.sidebar_collapsed else 36
-            )
-            button.setProperty("circular", self.sidebar_collapsed)
-            button.style().unpolish(button)
-            button.style().polish(button)
-        self.sidebar_status.hide()
-        self.sidebar_version.setVisible(not self.sidebar_collapsed)
-
-    def toggle_sidebar(self):
-        if self.closing:
-            return
-        self.sidebar_animation.stop()
-        start = self.sidebar.width()
-        self.sidebar_collapsed = not self.sidebar_collapsed
-        # Hide labels during the transition so they never get cut in half.
-        for button in self.nav.values():
-            button.setText("")
-            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-            button.setFixedWidth(34)
-        self.sidebar_toggle.setText("")
-        self.sidebar_status.hide()
-        self.sidebar_version.hide()
-        self.sidebar_animation.setStartValue(start)
-        self.sidebar_animation.setEndValue(42 if self.sidebar_collapsed else 144)
-        self.sidebar_animation.start()
-        settings = replace(self.settings, sidebar_collapsed=self.sidebar_collapsed)
-        try:
-            self.store.save_settings(settings)
-            self.settings = settings
-        except OSError:
-            self.log("Не удалось сохранить вид меню.")
-
-    def finish_sidebar_animation(self):
-        self.apply_sidebar_state()
-
     def page(self, title, map_background=False):
         page = WorldCanvas() if map_background else QWidget()
         layout = QVBoxLayout(page)
@@ -355,8 +232,7 @@ class MainWindow(
         self.stack.setCurrentIndex(index)
         if index == 2:
             self.refresh_autostart()
-        for i, button in self.nav.items():
-            button.setChecked(i == index)
+        self.navigation.set_current(index)
         if hasattr(self, "timer"):
             self.timer.setInterval(
                 (self.settings.flow_poll_seconds if index == 8 else self.settings.poll_seconds)
@@ -435,6 +311,7 @@ class MainWindow(
         )
         self.import_button.setEnabled(self.task is None and not self.closing)
         self.profile_add.setEnabled(self.task is None and not self.closing)
+        self.empty_profile_add.setEnabled(self.task is None and not self.closing)
         self.dashboard_update_button.setEnabled(
             self.task is None and not self.closing and self.profile is not None
         )
@@ -469,7 +346,7 @@ class MainWindow(
     def auto_client_location(self):
         from nodera.settings_ui import detect_point
 
-        if not self.settings.client_point and not self.settings.client_location_attempted:
+        if not self.closing and not self.settings.client_point:
             detect_point(self, automatic=True)
 
     def refresh_profile(self):
@@ -580,26 +457,8 @@ class MainWindow(
         scroll = self.node_list.verticalScrollBar().value()
         group = self.current_group()
         if not group:
-            self.group_hint.setText("Нет маршрутов")
-        else:
-            manual = group["type"] == "Selector"
-            text = (
-                "Ручной выбор"
-                if manual
-                else {
-                    "Fallback": "Резервирование",
-                    "URLTest": "Лучший отклик",
-                    "LoadBalance": "Балансировка",
-                    "Overview": "Маршруты профиля",
-                }.get(group["type"], "Автоматически")
-            )
-            if not self.connected:
-                text += " · Для следующего подключения"
-            elif group["current"]:
-                text += f" · Сейчас: {group['current']}"
-            if self.profile and self.profile.forced_server:
-                text = "Группа: " + group["name"] + " · Принудительный режим"
-            self.group_hint.setText(text)
+            self.node_list.clear()
+        if group:
             members = list(group["members"])
             if self.server_sort.currentData() == "name":
                 members.sort(key=lambda node: node["name"].casefold())
@@ -683,6 +542,7 @@ class MainWindow(
                             else node["name"] in group.get("active", [group["current"]])
                         ),
                         "forced": bool(self.profile and self.profile.forced_server == node["name"]),
+                        "can_force": bool(definition),
                         "frozen": node["name"] in self.core.frozen_routes,
                         "retry_in": max(
                             0, int(self.core.frozen_routes.get(node["name"], 0) - time.monotonic())
@@ -739,30 +599,12 @@ class MainWindow(
             return
         idle = self.task is None and not self.closing
         forced = self.profile.forced_server if self.profile else ""
-        self.route_mode_label.setText(
-            ("Закреплён маршрут: " + forced + ("" if self.connected else " · Для подключения"))
-            if forced
-            else "Стратегия подписки · " + self.profile_policy.get("strategy", "Не задана")
-        )
-        self.force_button.setVisible(True)
-        self.force_button.setChecked(bool(forced))
-        self.force_button.setText("Вернуть стратегию" if forced else "Включить маршрут")
         self.route_actions.setVisible(self.server_tabs.currentIndex() == 0)
         group = self.current_group()
-        concrete = bool(
-            self.profile
-            and any(
-                node.get("name") == self.current_node()
-                for node in self.profile.config.get("proxies", [])
-            )
-        )
+        self.select_button.setVisible(bool(group and group["type"] == "Selector" and not forced))
+        self.node_list.pin_enabled = idle
+        self.node_list.viewport().update()
         frozen = self.current_node() in self.core.frozen_routes
-        self.force_button.setEnabled(
-            bool(
-                idle
-                and (forced or concrete and not frozen and self.server_tabs.currentIndex() == 0)
-            )
-        )
         self.select_button.setEnabled(
             bool(
                 idle
@@ -801,7 +643,7 @@ class MainWindow(
         if self.groups_data:
             choices.update(self.groups_data[0].get("choices", {}))
         hops = route_for_node(self.display_profile(), member, choices)
-        dialog = RouteDialog(hops, self)
+        dialog = RouteDialog(hops, self, node_name=member)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         overrides = dict(self.profile.route_overrides)
@@ -857,8 +699,18 @@ class MainWindow(
 
         self.run_task(apply, selected)
 
-    def force_server(self):
-        member = self.current_node()
+    def toggle_server_pin(self, member):
+        if self.task or self.closing or not self.profile:
+            return
+        if self.profile.forced_server == member:
+            self.restore_server_policy()
+        elif member not in self.core.frozen_routes and any(
+            node.get("name") == member for node in self.profile.config.get("proxies", [])
+        ):
+            self.force_server(member)
+
+    def force_server(self, member=None):
+        member = member or self.current_node()
         if self.task or self.closing or not self.profile or not member:
             return
         profile = replace(self.profile, forced_server=member)
@@ -878,7 +730,7 @@ class MainWindow(
             if groups is not None:
                 self.set_groups(groups)
             else:
-                self.pending_connect = True
+                self.offline_groups()
             self.server_result.setText(
                 "Принудительно: " + member + ("" if saved else " · Не сохранено")
             )
@@ -886,13 +738,6 @@ class MainWindow(
             self.refresh_dashboard()
 
         self.run_task(apply, done)
-
-    def toggle_forced_route(self):
-        self.force_button.setChecked(bool(self.profile and self.profile.forced_server))
-        if self.profile and self.profile.forced_server:
-            self.restore_server_policy()
-        else:
-            self.force_server()
 
     def restore_server_policy(self):
         if self.task or self.closing or not self.profile:
@@ -1028,7 +873,7 @@ class MainWindow(
         self.network_checked_at = time.monotonic()
         self.network_state = "checking"
         self.state.setText(self.connection_state_text())
-        self.sidebar_status.setText("Проверка сети…")
+        self.navigation_status.setText("Проверка сети…")
         self.tray.setToolTip("Nodera · " + self.state.text())
 
         def checked(_):
@@ -1036,7 +881,7 @@ class MainWindow(
             self.network_state = "ok"
             self.network_error = ""
             self.state.setText(self.connection_state_text())
-            self.sidebar_status.setText("HTTPS проверен")
+            self.navigation_status.setText("HTTPS проверен")
             self.tray.setToolTip("Nodera · " + self.state.text())
             self.hint.setText(self.connection_hint)
             self.log(
@@ -1048,7 +893,7 @@ class MainWindow(
             self.network_state = "error"
             self.network_error = message
             self.state.setText(self.connection_state_text())
-            self.sidebar_status.setText("Проверка не прошла")
+            self.navigation_status.setText("Проверка не прошла")
             self.tray.setToolTip("Nodera · " + self.state.text())
             self.hint.setText(message)
             self.log(message, "warning")
@@ -1103,6 +948,8 @@ class MainWindow(
         self.session_profile = deepcopy(self.profile)
         self.network_checks_enabled = verify
         self.session_tun = effective_tun(self.profile.config if self.profile else {}, self.settings)
+        self.session_time.setText("00:00:00")
+        self.refresh_session_visibility()
         self.api_failures = 0
         self.network_state = "unverified"
         self.network_error = ""
@@ -1124,7 +971,7 @@ class MainWindow(
             self.log(f"Локальный порт выбран автоматически: {self.core.mixed_port}.")
         self.refresh_controls()
         self.server_result.setText("")
-        self.sidebar_status.setText(self.state.text())
+        self.navigation_status.setText(self.state.text())
         self.update_route_pill()
         if verify:
             self.check_connection()
@@ -1135,6 +982,7 @@ class MainWindow(
         self.delay_status.setText("Все маршруты · Автопроверка после подключения, каждые 60 с")
         self.flow_monitor.clear()
         self.connected = False
+        self.refresh_session_visibility()
         self.network_checked_wall = 0.0
         self.update_network_tag()
         self.render_flows(force=True)
@@ -1145,7 +993,7 @@ class MainWindow(
         self.state.setText("VPN отключён" if self.settings.tun else "Прокси отключён")
         self.hint.setText("")
         self.tray.setToolTip("Nodera · отключено")
-        self.sidebar_status.setText("Не подключено")
+        self.navigation_status.setText("Не подключено")
         self.session_time.setText("00:00:00")
         for value in self.stats:
             value.setText("—")
@@ -1170,7 +1018,7 @@ class MainWindow(
                 self.hint.setText(self.network_error or self.connection_hint)
             self.api_failures = 0
             self.state.setText(self.connection_state_text())
-            self.sidebar_status.setText(
+            self.navigation_status.setText(
                 {
                     "ok": "HTTPS проверен",
                     "checking": "Проверка сети…",
@@ -1203,7 +1051,7 @@ class MainWindow(
                 self.set_disconnected()
             elif self.api_failures >= 3:
                 self.state.setText("Нет связи с API ядра")
-                self.sidebar_status.setText("Нет связи")
+                self.navigation_status.setText("Нет связи")
                 self.tray.setToolTip("Nodera · " + self.state.text())
                 self.stats[2].setText("—")
             for value in self.stat_rates:
@@ -1295,6 +1143,7 @@ class MainWindow(
         self.close()
 
     def closeEvent(self, event):
+        self.navigation.palette.hide()
         if (
             self.settings.close_to_tray
             and not self.quit_requested

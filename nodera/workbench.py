@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -21,10 +22,13 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -133,19 +137,20 @@ class WorkbenchMixin:
             self.diagnose()
 
     def build_application(self):
-        layout = self.page("Приложение")
+        layout = self.page("О программе")
         row = QHBoxLayout()
         icon = label("")
-        icon.setPixmap(app_icon().pixmap(48, 48))
+        icon.setPixmap(app_icon().pixmap(44, 44))
+        icon.setFixedSize(44, 44)
+        row.setSpacing(14)
         row.addWidget(icon)
         column = QVBoxLayout()
         column.setSpacing(2)
         column.addWidget(label("Nodera", "dashboardProfile"))
         column.addWidget(label("Клиент для безопасных подключений", "muted"))
         row.addLayout(column, 1)
-        layout.addLayout(row)
         form = QFormLayout()
-        form.setVerticalSpacing(10)
+        form.setVerticalSpacing(8)
         os_name, os_release = windows_identity()
         self.application_values = {
             "Версия приложения": __version__,
@@ -158,45 +163,109 @@ class WorkbenchMixin:
         }
         panel = QWidget()
         panel.setObjectName("applicationCard")
-        panel.setMaximumWidth(510)
+        panel.setMaximumWidth(560)
         panel.setMinimumWidth(420)
+        panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.application_panel = panel
         content = QVBoxLayout(panel)
-        content.setContentsMargins(22, 20, 22, 20)
+        content.setContentsMargins(20, 20, 20, 16)
         content.setSpacing(16)
-        layout.removeItem(row)
         content.addLayout(row)
         self.application_version = label(
             version_text(),
-            "profileName",
+            "railDetail",
         )
         self.application_version.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
-        content.addWidget(self.application_version)
-        for caption, text in self.application_values.items():
-            if caption in {"Версия приложения", "Сборка", "Подписки"}:
-                continue
+        column.addWidget(self.application_version)
+        divider = QFrame()
+        divider.setObjectName("aboutDivider")
+        divider.setFixedHeight(1)
+        content.addWidget(divider)
+        self.application_details = QWidget()
+        details = QVBoxLayout(self.application_details)
+        details.setContentsMargins(0, 0, 0, 0)
+        details.setSpacing(12)
+        for caption, text in (
+            ("Ядро", self.application_values["Ядро"]),
+            ("Система", self.application_values["Система"]),
+            ("Данные", str(self.store.root)),
+        ):
             value = label(text, wrap=True)
+            if caption == "Данные":
+                value.setText(
+                    value.fontMetrics().elidedText(text, Qt.TextElideMode.ElideMiddle, 260)
+                )
+                value.setToolTip(text)
             value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             form.addRow(caption, value)
-        content.addLayout(form)
+        details.addLayout(form)
+        copy_info = QPushButton("Копировать сведения")
+        copy_info.setObjectName("quietAction")
+        copy_info.clicked.connect(
+            lambda: QApplication.clipboard().setText(
+                "Nodera "
+                + version_text()
+                + "\n"
+                + "\n".join(
+                    f"{name}: {value}"
+                    for name, value in self.application_values.items()
+                    if name in {"Ядро", "Система", "Хранение"}
+                )
+                + f"\nДанные: {self.store.root}"
+            )
+        )
+        details.addWidget(copy_info, 0, Qt.AlignmentFlag.AlignLeft)
+        self.application_details.hide()
         self.available_release = None
         self.downloaded_update = None
-        self.app_update_status = label("Обновления из GitHub Releases", "muted", True)
-        content.addWidget(self.app_update_status)
+        self.app_update_status = label("Проверить наличие обновлений", "muted", True)
         updates = QHBoxLayout()
-        self.app_update_check = QPushButton("Проверить обновления")
+        updates.setSpacing(16)
+        update_text = QVBoxLayout()
+        update_text.setSpacing(4)
+        update_text.addWidget(label("Обновления", "profileName"))
+        update_text.addWidget(self.app_update_status)
+        updates.addLayout(update_text, 1)
+        self.app_update_check = QPushButton("Проверить")
+        self.app_update_check.setObjectName("primary")
         self.app_update_check.clicked.connect(self.check_app_updates)
         self.app_update_install = QPushButton("Загрузить обновление")
+        self.app_update_install.setObjectName("primary")
         self.app_update_install.hide()
         self.app_update_install.clicked.connect(self.install_app_update)
         updates.addWidget(self.app_update_check)
         updates.addWidget(self.app_update_install)
         content.addLayout(updates)
+        self.app_update_progress = QProgressBar()
+        self.app_update_progress.setObjectName("aboutProgress")
+        self.app_update_progress.setRange(0, 0)
+        self.app_update_progress.setTextVisible(False)
+        self.app_update_progress.setFixedHeight(3)
+        self.app_update_progress.hide()
+        content.addWidget(self.app_update_progress)
+        self.application_details_toggle = QToolButton()
+        self.application_details_toggle.setObjectName("aboutDetails")
+        self.application_details_toggle.setText("Подробности")
+        self.application_details_toggle.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        self.application_details_toggle.setCheckable(True)
+        self.application_details_toggle.setArrowType(Qt.ArrowType.RightArrow)
+
+        def toggle_details(checked):
+            self.application_details.setVisible(checked)
+            self.application_details_toggle.setArrowType(
+                Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow
+            )
+
+        self.application_details_toggle.toggled.connect(toggle_details)
+        content.addWidget(self.application_details_toggle)
+        content.addWidget(self.application_details)
+        layout.addSpacing(12)
+        layout.addWidget(panel, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addStretch(1)
-        layout.addWidget(panel, 0, Qt.AlignmentFlag.AlignCenter)
-        layout.addStretch(2)
 
     def update_proxy(self):
         return (
@@ -220,25 +289,29 @@ class WorkbenchMixin:
         self.downloaded_update = None
         self.app_update_install.setText("Загрузить обновление")
         self.app_update_install.hide()
+        self.app_update_check.show()
+        self.app_update_progress.show()
         self.app_update_check.setEnabled(False)
         self.app_update_install.setEnabled(False)
         self.app_update_status.setText("Проверка GitHub…")
         proxy = self.update_proxy()
 
         def checked(release):
+            self.app_update_progress.hide()
+            self.app_update_check.setVisible(release is None)
             self.schedule_app_update_check(6 * 60 * 60 * 1000)
             self.available_release = release
             self.app_update_check.setEnabled(True)
             self.app_update_install.setEnabled(True)
             self.app_update_install.setVisible(release is not None)
             self.app_update_status.setText(
-                f"Доступна версия {release.version}. Обновление можно загрузить в фоне "
-                "и установить в удобное время."
+                f"Доступна версия {release.version}"
                 if release
                 else f"Установлена актуальная версия {__version__}"
             )
 
         def failed(message):
+            self.app_update_progress.hide()
             self.schedule_app_update_check(30 * 60 * 1000)
             self.app_update_check.setEnabled(True)
             self.app_update_install.setEnabled(self.available_release is not None)
@@ -277,18 +350,20 @@ class WorkbenchMixin:
         self.app_update_check.setEnabled(False)
         self.app_update_install.setEnabled(False)
         self.app_update_status.setText("Загрузка и проверка установщика…")
+        self.app_update_progress.show()
 
         def downloaded(path):
+            self.app_update_progress.hide()
             self.downloaded_update = path
             self.app_update_check.setEnabled(True)
             self.app_update_install.setEnabled(True)
             self.app_update_install.setText("Установить обновление")
             self.app_update_status.setText(
-                f"Версия {release.version} загружена и проверена. Можно продолжать работу. "
-                "При установке потребуется перезапуск клиента и короткий разрыв подключения."
+                f"Версия {release.version} готова. Установка перезапустит клиент."
             )
 
         def failed(message):
+            self.app_update_progress.hide()
             self.app_update_check.setEnabled(True)
             self.app_update_install.setEnabled(True)
             self.app_update_status.setText(message)
@@ -308,22 +383,12 @@ class WorkbenchMixin:
 
     def build_servers(self):
         layout = self.page("Серверы")
-        mode_row = QHBoxLayout()
-        self.route_mode_label = label("Стратегия подписки", "routeMode", True)
-        mode_row.addWidget(self.route_mode_label, 1)
-        self.restore_policy_button = self.force_button = QPushButton("Включить маршрут")
-        self.force_button.setObjectName("forceRoute")
-        self.force_button.setCheckable(True)
-        self.force_button.clicked.connect(self.toggle_forced_route)
-        self.restore_policy_action = self.restore_policy_button
-        mode_row.addWidget(self.restore_policy_button)
-        layout.addLayout(mode_row)
         bar = QHBoxLayout()
         self.group_combo = QComboBox()
         self.group_combo.setAccessibleName("Группа серверов")
         self.group_combo.currentIndexChanged.connect(self.render_nodes)
         self.server_search = QLineEdit()
-        self.server_search.setPlaceholderText("Найти маршрут, IP или страну")
+        self.server_search.setPlaceholderText("Поиск по маршрутам и адресам")
         self.server_search.textChanged.connect(self.filter_nodes)
         self.server_sort = combo(
             [("Из подписки", "profile"), ("По имени", "name"), ("По задержке", "delay")], "profile"
@@ -335,16 +400,22 @@ class WorkbenchMixin:
         bar.addWidget(self.server_search, 2)
         bar.addWidget(self.server_sort)
         layout.addLayout(bar)
-        self.group_hint = label("Нет маршрутов", "muted", True)
-        layout.addWidget(self.group_hint)
         self.server_tabs = QTabWidget()
         self.node_list = NodeList()
+        self.node_list.pin_requested.connect(self.toggle_server_pin)
         self.node_list.currentRowChanged.connect(self.server_selection_changed)
         self.server_tabs.addTab(self.node_list, "Маршруты")
         addresses = QWidget()
         column = QVBoxLayout(addresses)
         column.setContentsMargins(0, 10, 0, 0)
         self.address_table = QTableWidget(0, 7)
+        self.address_table.setObjectName("routeAddresses")
+        self.address_table.setShowGrid(False)
+        self.address_table.setAlternatingRowColors(True)
+        self.address_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.address_table.setFrameShape(QFrame.Shape.NoFrame)
+        self.address_table.verticalHeader().setDefaultSectionSize(34)
+        self.address_table.horizontalHeader().setHighlightSections(False)
         self.address_table.setHorizontalHeaderLabels(
             ["Участок / адрес", "IP", "Страна", "Город", "Сеть / ASN", "Кол-во", "Проверено"]
         )
@@ -354,9 +425,15 @@ class WorkbenchMixin:
         self.address_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Interactive
         )
-        self.address_table.horizontalHeader().setStretchLastSection(True)
-        for index, width in enumerate((155, 110, 125, 70, 95, 50, 72)):
+        self.address_table.horizontalHeader().setDefaultAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.address_table.horizontalHeader().setStretchLastSection(False)
+        for index, width in enumerate((210, 125, 140, 120, 170, 60, 100)):
             self.address_table.setColumnWidth(index, width)
+        self.address_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
         self.address_table.setWordWrap(False)
         column.addWidget(self.address_table, 1)
         copy_addresses = QPushButton("Копировать выбранные адреса")
@@ -368,12 +445,9 @@ class WorkbenchMixin:
         column.addWidget(self.address_note)
         self.server_tabs.addTab(addresses, "IP и маршрут")
         layout.addWidget(self.server_tabs, 1)
-        self.select_button = QPushButton("Выбрать")
-        self.select_button.setObjectName("primary")
+        self.select_button = QPushButton("Выбрать в группе")
+        self.select_button.setObjectName("quietAction")
         self.select_button.clicked.connect(self.select_server)
-        self.force_button.setToolTip(
-            "Все новые соединения через выбранный маршрут, независимо от правил и стратегии"
-        )
         self.delay_button = QPushButton("Задержка")
         self.delay_button.setToolTip(
             "HTTPS-проверка всех маршрутов подписки. Автоматически — каждые 60 секунд при подключении."
@@ -397,7 +471,10 @@ class WorkbenchMixin:
         self.delay_status = label("Все маршруты · Задержка обновляется каждые 60 с", "muted", True)
         checks.addWidget(self.delay_status, 1)
         checks.addWidget(self.refresh_servers_button)
-        layout.insertLayout(layout.indexOf(self.server_tabs), checks)
+        checks_panel = QFrame()
+        checks_panel.setObjectName("serverChecks")
+        checks_panel.setLayout(checks)
+        checks.setContentsMargins(10, 8, 10, 8)
         self.route_actions = QWidget()
         row = QHBoxLayout(self.route_actions)
         row.setContentsMargins(0, 0, 0, 0)
@@ -408,6 +485,7 @@ class WorkbenchMixin:
             row.addWidget(button)
         row.addStretch()
         layout.addWidget(self.route_actions)
+        layout.addWidget(checks_panel)
         self.server_tabs.currentChanged.connect(self.refresh_server_controls)
         self.server_result = label("", "muted", True)
         layout.addWidget(self.server_result)

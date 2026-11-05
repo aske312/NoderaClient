@@ -8,22 +8,34 @@ QLabel:disabled { color: #496572; }
 QWidget#titleBar { background: transparent; border: none; }
 QFrame#windowFrame, QWidget#windowBody, QStackedWidget, QScrollArea { background: transparent; border: none; }
 QLabel#windowTitle { color: #b5cbd3; font-size: 12px; font-weight: 600; }
-QFrame#sidebar { background: #0c1b24; border: 1px solid #1b303c; border-radius: 16px; }
-QToolButton#nav, QToolButton#menuToggle { background: transparent; border: none; border-radius: 8px; padding: 8px; color: #8da6b1; font-weight: 500; text-align: left; }
-QToolButton#nav:hover, QToolButton#menuToggle:hover { background: #142b36; color: #e4eff2; }
-QToolButton#nav:checked { background: #173943; color: #9ce6e0; }
-QToolButton#nav:focus, QToolButton#menuToggle:focus { border: 1px solid #3b747b; }
-QToolButton#menuToggle { color: #6e8c9b; }
-QFrame#sidebar[collapsed="true"] { background: transparent; border: none; }
-QToolButton#nav[circular="true"] { background: #0e252f; border: 1px solid #23414d; border-radius: 17px; padding: 0; }
+QFrame#navigationDock { background: #0d222c; border: 1px solid #28424d; border-radius: 16px; }
+QToolButton#dockTab { background: transparent; border: 1px solid transparent; border-radius: 9px; padding: 4px 7px; color: #8da6b1; font-weight: 500; }
+QToolButton#dockTab:hover { background: #17343e; color: #e4eff2; }
+QToolButton#dockTab:checked { background: #20463f; border-color: #326355; color: #b4ecd6; }
+QToolButton#dockTab:focus { border-color: #3b747b; }
+QToolButton#dockTab[tools="true"] { padding-right: 18px; }
+QFrame#dockDivider { background: #28424d; border: none; }
+QFrame#navigationPalette { background: #10242e; border: 1px solid #304c57; border-radius: 10px; }
+QPushButton#navigationEntry { background: transparent; border: 1px solid transparent; border-radius: 7px; padding: 0; text-align: left; }
+QPushButton#navigationEntry:hover, QPushButton#navigationEntry:focus { background: #1a3640; border-color: #355763; }
+QPushButton#navigationEntry:checked { background: #1a3c39; border-color: #315c51; }
+QLabel#navigationTitle { font-size: 12px; font-weight: 500; color: #d6e8ec; }
 QPushButton#networkTag { padding: 3px 8px; border-radius: 8px; background: #17303a; color: #a4bac4; font-size: 11px; }
 QPushButton#networkTag[state="ok"] { background: #153b32; border-color: #376754; color: #8fdbc1; }
 QPushButton#networkTag[state="error"] { background: #3b2b26; border-color: #735044; color: #e6b49d; }
+QPushButton#connectionStatus { background: transparent; border: none; color: #8faab5; font-size: 13px; font-weight: 500; padding: 3px 6px; }
+QPushButton#connectionStatus[state="ok"] { color: #8fdbc1; }
+QPushButton#connectionStatus[state="error"] { color: #e6b49d; }
+QPushButton#connectionStatus:hover:enabled { color: #c8f3ed; }
+QFrame#serverChecks { background: #10232d; border: 1px solid #203b47; border-radius: 9px; }
+QFrame#routeHop { background: #10252e; border: 1px solid #26424e; border-radius: 10px; }
+QLabel#hopNumber { background: #1c3c40; color: #9cdbcc; border-radius: 12px; font-size: 11px; font-weight: 600; }
+QToolButton#hopAction { background: transparent; color: #98b6c1; border: none; border-radius: 5px; }
+QToolButton#hopAction:hover { background: #21404c; }
+QToolButton#hopAction:disabled { color: #425d68; }
+QLabel#routeEditorError { color: #e6b49d; }
 QPushButton#forceRoute:checked { background: #214e45; border-color: #4f9a83; color: #c1f3df; }
 QLabel#routeMode { color: #9ddbd2; padding: 7px 10px; background: #102b32; border-radius: 7px; }
-QToolButton#nav[circular="true"]:checked { background: #21515a; border-color: #5ab8b5; }
-QToolButton#nav[circular="true"]:hover { background: #1c414c; }
-QToolButton#menuToggle { padding: 3px; border-radius: 8px; }
 QLabel#title { font-size: 21px; font-weight: 650; color: #eaf3f5; margin-bottom: 2px; }
 QLabel#dashboardProfile { font-size: 20px; font-weight: 650; color: #eaf3f5; }
 QLabel#profileName { font-size: 14px; font-weight: 600; }
@@ -36,6 +48,11 @@ QLabel#status { font-size: 18px; font-weight: 650; }
 QLabel#badge { background: #15332e; color: #69c8aa; border-radius: 8px; padding: 4px 8px; font-size: 11px; }
 QFrame#card, QFrame#profileBanner { background: #0e202a; border: 1px solid #1b3440; border-radius: 14px; }
 QWidget#applicationCard { background: #0e202a; border: 1px solid #1b3440; border-radius: 12px; }
+QFrame#aboutDivider { background: #1b3440; border: none; }
+QToolButton#aboutDetails { background: transparent; border: none; color: #8da6b1; padding: 0; text-align: left; }
+QToolButton#aboutDetails:hover { color: #c8f3ed; }
+QProgressBar#aboutProgress { background: #16333d; border: none; border-radius: 1px; }
+QProgressBar#aboutProgress::chunk { background: #69c8b8; border-radius: 1px; }
 QFrame#settingsCard { background: #0d222c; border: 1px solid #1d3a47; border-radius: 10px; }
 QFrame#quotaRail { background: #0c1e28; border: none; border-radius: 14px; }
 QLabel#quotaValue { font-size: 13px; font-weight: 600; color: #d8edf0; }
@@ -95,6 +112,11 @@ QTreeWidget#connectionBlocks::item { background: transparent; border: none; padd
 QHeaderView::section { background: #102833; border: none; padding: 8px; color: #83a5b3; font-weight: 600; }
 QTableWidget { gridline-color: #1b3a46; }
 QTableWidget::item { padding: 4px; }
+QTableWidget#routeAddresses { background: #0c1e28; alternate-background-color: #10252e; border: none; border-radius: 0; selection-background-color: #20423f; }
+QTableWidget#routeAddresses::item { padding: 7px 9px; border: none; border-bottom: 1px solid #1c3540; }
+QTableWidget#routeAddresses::item:hover { background: #18323d; }
+QTableWidget#routeAddresses::item:selected { background: #20423f; color: #d7f0e6; }
+QTableWidget#routeAddresses QHeaderView::section { background: #10252e; border: none; border-bottom: 1px solid #31505a; padding: 9px; color: #8caab5; }
 QMenu, QToolTip { background: #102733; padding: 6px; border: 1px solid #2b4956; color: #d6e8eb; }
 QMenu::item { padding: 7px 20px; border-radius: 6px; }
 QMenu::item:selected { background: #244c57; }

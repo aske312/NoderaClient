@@ -48,6 +48,33 @@ def test_clean_install_has_no_profiles_and_never_fetches_subscription(tmp_path, 
         app.processEvents()
 
 
+def test_empty_subscription_page_offers_add_button_instead_of_empty_list(tmp_path, monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Store(tmp_path), Settings(geo_auto=False, update_hours=0), None)
+    window.timer.stop()
+    window.client_location_timer.stop()
+    opened = []
+    monkeypatch.setattr(SubscriptionDialog, "exec", lambda dialog: opened.append(True) or 0)
+    window.show()
+    window.navigate(1)
+    app.processEvents()
+    try:
+        assert window.profile_empty.isVisible()
+        assert not window.profile_list.isVisible()
+        assert not window.profile_actions.isVisible()
+        window.empty_profile_add.click()
+        assert opened == [True]
+        window.profile = profile("Personal")
+        window.refresh_profile()
+        app.processEvents()
+        assert not window.profile_empty.isVisible()
+        assert window.profile_list.isVisible()
+    finally:
+        window.quit_requested = True
+        window.close()
+        app.processEvents()
+
+
 def test_subscription_display_has_no_provider_badge(tmp_path):
     app = QApplication.instance() or QApplication([])
     saved = profile("Personal")

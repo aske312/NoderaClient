@@ -104,6 +104,7 @@ def policy_view(profile: Profile | None) -> dict:
         )
     return {
         "strategy": strategy,
+        "strategy_known": bool(groups and groups[0].get("type") in STRATEGIES),
         "routing": route,
         "rules": rows,
         "blocked": sum(target in {"REJECT", "REJECT-DROP"} for _, _, target in rows),

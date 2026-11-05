@@ -119,7 +119,7 @@ def test_selected_connection_can_be_closed_in_automatic_strategy(tmp_path, monke
         time.sleep(0.01)
     assert calls == ["active-id"]
     assert not window.flow_monitor.flows["active-id"]["active"]
-    assert window.force_button.isEnabled()
+    assert window.node_list.pin_enabled
     window.connected = False
     window.close()
 

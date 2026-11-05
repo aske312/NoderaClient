@@ -45,7 +45,7 @@ class WorldMap(QWidget):
             return
         self.locations, self.connected = locations, connected
         self.hit_regions = []
-        text = " · ".join(item["name"] for item in locations)
+        text = " · ".join(point_name(item) for item in locations)
         state = text or ("Локация не указана" if connected else "Не подключено")
         self.setAccessibleName("Карта мира · " + state)
         self.describe()
@@ -67,12 +67,12 @@ class WorldMap(QWidget):
                 if self.client_point.get("source") == "ip-physical"
                 else "указано вручную"
             )
-            lines.append("Клиент: " + self.client_point["name"] + " · " + source)
+            lines.append("Клиент: " + point_name(self.client_point) + " · " + source)
         for location in self.locations:
             role = {"relay": "Relay", "cdn": "CDN", "server": "Выход"}.get(
                 location.get("role"), "Сервер"
             )
-            lines.append(role + ": " + location["name"])
+            lines.append(role + ": " + point_name(location))
         if any(not location.get("order_known", True) for location in self.locations):
             lines.append(
                 "Светлый пунктир — схема известных точек; порядок участков не передан подпиской."
@@ -195,23 +195,23 @@ class WorldMap(QWidget):
             font.setBold(True)
             painter.setFont(font)
             text = (
-                "1 · Клиент"
+                "1 · " + point_name(location)
                 if location.get("role") == "client"
                 else (
                     (str(location.get("step", index) + (2 if self.client_point else 1)) + " · ")
                     if location.get("order_known", True)
                     else ""
                 )
-                + location["code"]
+                + point_name(location)
             )
             if (
                 self.client_point
                 and location.get("entry")
                 and not location.get("order_known", True)
             ):
-                text = "2 · " + location["code"]
+                text = "2 · " + point_name(location)
             badge_width = min(
-                130, self.width() - 8, painter.fontMetrics().horizontalAdvance(text) + 38
+                190, self.width() - 8, painter.fontMetrics().horizontalAdvance(text) + 38
             )
             x = max(4, min(self.width() - badge_width - 4, point.x() + 12))
             lower = self.height() - self.bottom_inset - 28
@@ -271,8 +271,8 @@ class WorldCanvas(QWidget):
         super().__init__()
         self.world_map = WorldMap(self)
         self.world_map.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.world_map.top_inset = 48
-        self.world_map.bottom_inset = 108
+        self.world_map.top_inset = 34
+        self.world_map.bottom_inset = 76
         self.setMouseTracking(True)
 
     def event(self, event):
@@ -296,11 +296,19 @@ class WorldCanvas(QWidget):
         self.world_map.lower()
 
 
+def point_name(location):
+    for field in ("city", "name", "code"):
+        value = " ".join(str(location.get(field) or "").split())
+        if value:
+            return value
+    return "Адрес"
+
+
 def point_tooltip(location):
     role = {"client": "Клиент", "relay": "Relay", "cdn": "CDN", "server": "Выход"}.get(
         location.get("role"), "Маршрут"
     )
-    lines = [role + " · " + location.get("name", location.get("code", ""))]
+    lines = [role + " · " + point_name(location)]
     if location.get("node"):
         lines.append("Маршрут: " + location["node"])
     if location.get("host"):

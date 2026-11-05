@@ -8,16 +8,18 @@ from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
+    QFrame,
     QHBoxLayout,
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QVBoxLayout,
 )
 
 from nodera.dialogs import SubscriptionDialog
 from nodera.models import ClientError, ProfileLibrary
 from nodera.subscription import fetch_profile
-from nodera.widgets import label
+from nodera.widgets import AddProfileButton, label
 
 
 class ProfilesMixin:
@@ -74,9 +76,24 @@ class ProfilesMixin:
         self.profile_list.setAccessibleName("Сохранённые подписки")
         self.profile_list.currentItemChanged.connect(self.select_profile_item)
         layout.addWidget(self.profile_list, 1)
+        self.profile_empty = QFrame()
+        empty = QVBoxLayout(self.profile_empty)
+        empty.setSpacing(10)
+        empty.addStretch()
+        self.empty_profile_add = AddProfileButton()
+        self.empty_profile_add.setFixedSize(52, 52)
+        self.empty_profile_add.setAccessibleName("Добавить первую подписку")
+        self.empty_profile_add.setToolTip("Добавить подписку")
+        self.empty_profile_add.clicked.connect(self.import_profile)
+        empty.addWidget(self.empty_profile_add, 0, Qt.AlignmentFlag.AlignHCenter)
+        empty.addWidget(label("Добавить подписку", "profileName"), 0, Qt.AlignmentFlag.AlignHCenter)
+        empty.addStretch()
+        layout.addWidget(self.profile_empty, 1)
         self.subscription_info = label("Нет подписок", "muted", True)
         layout.addWidget(self.subscription_info)
-        row = QHBoxLayout()
+        self.profile_actions = QFrame()
+        row = QHBoxLayout(self.profile_actions)
+        row.setContentsMargins(0, 0, 0, 0)
         self.update_button = QPushButton("Обновить")
         self.update_button.clicked.connect(self.update_profile)
         self.rename_profile_button = QPushButton("Переименовать")
@@ -86,7 +103,7 @@ class ProfilesMixin:
         for button in (self.update_button, self.rename_profile_button, self.delete_button):
             row.addWidget(button)
         row.addStretch()
-        layout.addLayout(row)
+        layout.addWidget(self.profile_actions)
 
     def refresh_library(self):
         if self.profile:
@@ -130,8 +147,12 @@ class ProfilesMixin:
                 self.profile_selector.setCurrentIndex(index)
         self.profile_selector.setVisible(self.profile is not None)
         self.profile_add.setVisible(self.profile is None)
-        self.route_caption.setVisible(self.profile is not None)
-        self.current_route_button.setVisible(self.profile is not None)
+        has_profiles = bool(self.library.profiles)
+        self.profile_list.setVisible(has_profiles)
+        self.profile_empty.setVisible(not has_profiles)
+        self.profile_actions.setVisible(has_profiles)
+        self.import_button.setVisible(has_profiles)
+        self.subscription_info.setVisible(has_profiles)
         del blockers
 
     def select_profile_item(self, current, previous):

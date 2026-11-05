@@ -2,6 +2,8 @@ import os
 import threading
 import time
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, Qt
@@ -12,7 +14,7 @@ from nodera.delay_probe import probe_delays
 from nodera.models import ClientError, Profile, Settings
 from nodera.storage import Store
 from nodera.ui import MainWindow
-from nodera.world_map import WorldCanvas
+from nodera.world_map import WorldCanvas, point_name, point_tooltip
 
 
 def wait(app, predicate):
@@ -84,20 +86,63 @@ def test_explicit_forced_mode_and_one_click_return(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(window.core, "force_server", lambda name: calls.append(name) or groups)
     monkeypatch.setattr(window.core, "restore_policy", lambda: calls.append("strategy") or groups)
-    window.force_button.click()
+    window.node_list.request_pin(window.node_list.item(1))
     wait(app, lambda: window.task is None)
-    assert "route-1" in window.route_mode_label.text()
-    assert window.restore_policy_button.isVisible()
     assert window.node_list.item(1).data(Qt.ItemDataRole.UserRole + 1)["forced"]
-    window.restore_policy_button.click()
+    window.node_list.request_pin(window.node_list.item(1))
     wait(app, lambda: window.task is None)
     assert calls == ["route-1", "strategy"]
-    assert not window.profile.forced_server and not window.force_button.isChecked()
-    assert window.force_button is window.restore_policy_button
-    assert window.force_button.text() == "Включить маршрут"
-    assert "Стратегия подписки" in window.route_mode_label.text()
+    assert not window.profile.forced_server
+    assert not hasattr(window, "force_button")
+    assert not hasattr(window, "route_mode_label")
     window.connected = False
     window.close()
+
+
+@pytest.mark.parametrize("connected", [False, True])
+def test_row_stars_switch_forced_route_and_restore_automatic_strategy(
+    tmp_path, monkeypatch, connected
+):
+    app, window = make_window(tmp_path)
+    window.connected = connected
+    groups = window.groups_data
+    calls = []
+    monkeypatch.setattr(window.core, "force_server", lambda name: calls.append(name) or groups)
+    monkeypatch.setattr(window.core, "restore_policy", lambda: calls.append("strategy") or groups)
+    monkeypatch.setattr(
+        window.core, "select", lambda *args: pytest.fail("Star used group strategy")
+    )
+    monkeypatch.setattr(window, "toggle", lambda: pytest.fail("Star started an offline connection"))
+
+    def star(row):
+        item = window.node_list.item(row)
+        point = window.node_list.pin_rect(item).center().toPoint()
+        QTest.mouseClick(window.node_list.viewport(), Qt.MouseButton.LeftButton, pos=point)
+        wait(app, lambda: window.task is None)
+
+    try:
+        # Selecting a row alone does not change routing.
+        window.node_list.setCurrentRow(1)
+        assert not window.profile.forced_server
+        star(0)
+        assert window.profile.forced_server == "route-0"
+        star(1)
+        assert window.profile.forced_server == "route-1"
+        assert Store(tmp_path).load_profile().forced_server == "route-1"
+        assert window.node_list.item(1).data(Qt.ItemDataRole.UserRole + 1)["forced"]
+        assert not window.node_list.item(0).data(Qt.ItemDataRole.UserRole + 1)["forced"]
+        star(1)
+        assert not window.profile.forced_server
+        assert not window.pending_connect
+        assert calls == (["route-0", "route-1", "strategy"] if connected else [])
+        window.core.frozen_routes["route-0"] = time.monotonic() + 60
+        window.render_nodes()
+        star(0)
+        assert not window.profile.forced_server
+    finally:
+        window.connected = False
+        window.close()
+        app.processEvents()
 
 
 def test_global_checks_all_routes_and_periodic_refresh_preserves_selection(tmp_path, monkeypatch):
@@ -169,9 +214,8 @@ def test_map_only_describes_the_hovered_point():
     canvas.close()
 
 
-def test_network_tag_tracks_actual_probe_and_original_menu_heights(tmp_path, monkeypatch):
+def test_network_tag_tracks_actual_probe_while_navigation_remains_usable(tmp_path, monkeypatch):
     app, window = make_window(tmp_path)
-    assert all(button.height() == 36 for button in window.nav.values())
     window.connected = True
     window.profile = None  # no route checks needed for this isolated status test
     monkeypatch.setattr(window.core, "check_connectivity", lambda: 10)
@@ -189,10 +233,36 @@ def test_network_tag_tracks_actual_probe_and_original_menu_heights(tmp_path, mon
     window.check_connection()
     wait(app, lambda: not window.inspections)
     assert window.network_tag.property("state") == "error"
-    window.sidebar_toggle.click()
-    window.sidebar_animation.setCurrentTime(window.sidebar_animation.duration())
+    window.navigation.tools.click()
     app.processEvents()
-    assert all(button.height() == 34 for button in window.nav.values())
-    assert window.sidebar.width() == 42
+    assert window.navigation.palette.isVisible()
+    window.navigation.choose(7)
+    assert window.stack.currentIndex() == 7
+    assert not window.navigation.palette.isVisible()
     window.connected = False
     window.close()
+
+
+def test_map_names_use_city_for_each_role_and_country_when_city_is_unknown():
+    for role in ("client", "relay", "cdn", "server"):
+        location = dict(role=role, city="  Frankfurt  ", name="Germany", code="DE")
+        assert point_name(location) == "Frankfurt"
+        assert "Frankfurt" in point_tooltip(location)
+        location["city"] = " "
+        assert point_name(location) == "Germany"
+    assert point_name(dict(role="client", name="Moscow", code="RU")) == "Moscow"
+
+
+def test_server_checks_remain_visible_in_same_footer_for_both_tabs(tmp_path):
+    app, window = make_window(tmp_path)
+    try:
+        positions = []
+        for index in (0, 1):
+            window.server_tabs.setCurrentIndex(index)
+            app.processEvents()
+            assert window.delay_button.isVisible() and window.geo_button.isVisible()
+            positions.append(window.geo_button.mapTo(window, QPoint(0, 0)).y())
+        assert positions[0] == positions[1]
+    finally:
+        window.close()
+        app.processEvents()

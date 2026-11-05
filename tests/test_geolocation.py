@@ -60,6 +60,7 @@ def test_resolves_both_families_and_binds_relay_and_origin(tmp_path):
     locations = verified_locations(routes, {"Node": result})
     assert [item["code"] for item in locations] == ["DE", "DE"]
     assert all(item["source"] == "geoip" for item in locations)
+    assert [item["city"] for item in locations] == ["Frankfurt", "Frankfurt"]
 
 
 def test_private_addresses_and_local_names_never_leave_machine(tmp_path):

@@ -29,9 +29,7 @@ def test_empty_dashboard_plus_menu_and_shared_version(tmp_path, monkeypatch):
     app.processEvents()
     assert window.profile_add.isVisible()
     assert not window.profile_selector.isVisible()
-    assert window.sidebar_toggle.y() > max(button.y() for button in window.nav.values())
-    assert window.sidebar_toggle.width() == 28
-    assert window.sidebar_version.text() == window.application_version.text() == version_text()
+    assert window.application_version.text() == version_text()
     assert version_text().startswith(f"v. {__version__} build:")
     from nodera.dialogs import SubscriptionDialog
 
@@ -39,14 +37,12 @@ def test_empty_dashboard_plus_menu_and_shared_version(tmp_path, monkeypatch):
     monkeypatch.setattr(SubscriptionDialog, "exec", lambda dialog: calls.append(True) or 0)
     window.profile_add.click()
     assert calls == [True]
-    window.sidebar_toggle.click()
-    # Finish the animation deterministically, even while a parallel build is busy.
-    window.sidebar_animation.setCurrentTime(window.sidebar_animation.duration())
+    window.navigation.tools.click()
     app.processEvents()
-    assert all(
-        button.property("circular") and button.width() == button.height()
-        for button in window.nav.values()
-    )
+    assert window.navigation.palette.isVisible()
+    window.navigation.choose(7)
+    assert window.stack.currentIndex() == 7
+    assert not window.navigation.palette.isVisible()
     window.close()
 
 

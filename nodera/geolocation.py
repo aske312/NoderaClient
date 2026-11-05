@@ -321,6 +321,7 @@ def verified_locations(routes, results):
                         "lat": row["lat"],
                         "lon": row["lon"],
                         "ip": row["ip"],
+                        "city": " ".join(str(row.get("city") or "").split())[:100],
                         "observed": row.get("observed", False),
                         "route": route_index,
                         "node": route["node"],

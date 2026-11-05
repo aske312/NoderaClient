@@ -254,54 +254,58 @@ def test_auto_update_while_connected_preserves_profile_on_failure_and_retries(
     app.processEvents()
 
 
-def test_right_navigation_collapses_switches_pages_and_survives_restart(tmp_path):
+def test_bottom_navigation_reaches_every_page_and_closes_palette(tmp_path, monkeypatch):
+    monkeypatch.setattr("nodera.autostart.is_enabled", lambda: False)
     app = QApplication.instance() or QApplication([])
-    window = MainWindow(Store(tmp_path), Settings(update_hours=0), None)
+    window = MainWindow(Store(tmp_path), Settings(update_hours=0, geo_auto=False), None)
     window.timer.stop()
     window.show()
     app.processEvents()
-    assert window.sidebar.x() > window.stack.x()
-    assert window.sidebar.width() == 144
-    previous_width = window.stack.width()
-    window.sidebar_toggle.click()
-    QTest.qWait(250)
-    app.processEvents()
-    assert window.sidebar.width() == 42
-    assert window.stack.width() > previous_width
-    window.current_route_button.setText("Длинное название сервера " * 12)
-    app.processEvents()
-    center = window.power.mapTo(
-        window, QPoint(window.power.width() // 2, window.power.height() // 2)
-    )
-    assert abs(center.x() - window.stack.geometry().center().x()) <= 2
-    assert not window.nav[2].text()
-    assert window.nav[2].toolTip() == "Настройки"
-    window.nav[2].click()
-    assert window.stack.currentIndex() == 2
-    assert window.nav[2].isChecked()
-    assert Store(tmp_path).load_settings().sidebar_collapsed
-    window.activateWindow()
-    window.setFocus()
-    app.processEvents()
-    QTest.keyClick(window, Qt.Key.Key_B, Qt.KeyboardModifier.ControlModifier)
-    QTest.qWait(250)
-    app.processEvents()
-    assert window.sidebar.width() == 144
-    assert window.nav[2].text() == "Настройки"
-    # Reversing an in-flight animation must leave a usable final panel.
-    window.sidebar_toggle.click()
-    QTest.qWait(30)
-    window.sidebar_toggle.click()
-    QTest.qWait(30)
-    window.sidebar_toggle.click()
-    QTest.qWait(250)
-    app.processEvents()
-    assert window.sidebar.width() == 42
-    window.close()
-    app.processEvents()
-    restored = MainWindow(Store(tmp_path), Store(tmp_path).load_settings(), None)
-    restored.timer.stop()
-    assert restored.sidebar.width() == 42
-    assert restored.sidebar_collapsed
-    restored.close()
-    app.processEvents()
+    try:
+        assert (
+            window.navigation.mapTo(window, QPoint(0, 0)).y()
+            >= window.stack.mapTo(window, QPoint(0, window.stack.height())).y()
+        )
+        for index in (0, 4, 1):
+            window.nav[index].click()
+            assert window.stack.currentIndex() == index
+            assert window.nav[index].isChecked()
+        for index in (6, 8, 2, 7):
+            window.navigation.tools.click()
+            app.processEvents()
+            assert window.navigation.palette.isVisible()
+            window.nav[index].click()
+            app.processEvents()
+            assert window.stack.currentIndex() == index
+            assert window.navigation.tools.isChecked()
+            assert not window.navigation.palette.isVisible()
+        window.navigation.tools.click()
+        app.processEvents()
+        QTest.keyClick(window.navigation.palette, Qt.Key.Key_Escape)
+        app.processEvents()
+        assert not window.navigation.palette.isVisible()
+        assert window.stack.currentIndex() == 7
+        window.nav[0].click()
+        window.current_route_button.setText("Long server name " * 12)
+        app.processEvents()
+        center = window.power.mapTo(
+            window, QPoint(window.power.width() // 2, window.power.height() // 2)
+        )
+        assert abs(center.x() - window.stack.geometry().center().x()) <= 2
+        window.activateWindow()
+        window.setFocus()
+        app.processEvents()
+        QTest.keyClick(window, Qt.Key.Key_2, Qt.KeyboardModifier.ControlModifier)
+        app.processEvents()
+        assert window.stack.currentIndex() == 4
+        QTest.keyClick(window, Qt.Key.Key_K, Qt.KeyboardModifier.ControlModifier)
+        app.processEvents()
+        assert window.navigation.palette.isVisible()
+        QTest.keyClick(window.navigation.palette, Qt.Key.Key_Escape)
+        app.processEvents()
+        assert not window.navigation.palette.isVisible()
+        wait_task(window, app)
+    finally:
+        window.quit_requested = True
+        window.close()
+        app.processEvents()
