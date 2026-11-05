@@ -14,6 +14,13 @@ STRATEGIES = {
 }
 
 
+def is_pro_subscription(profile: Profile | None) -> bool:
+    try:
+        return profile is not None and urlsplit(profile.url).hostname == "312node.net"
+    except ValueError:
+        return False
+
+
 def effective_tun(config: dict, settings: Settings) -> bool:
     return settings.tun
 

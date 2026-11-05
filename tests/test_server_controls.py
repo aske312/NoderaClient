@@ -165,13 +165,9 @@ def test_global_checks_all_routes_and_periodic_refresh_preserves_selection(tmp_p
     window.delay_timer.timeout.emit()
     wait(app, lambda: not window.inspections)
     assert len(calls) == 2
-    geo_calls = []
-    monkeypatch.setattr(window, "check_locations", lambda **kwargs: geo_calls.append(kwargs))
-    window.geo_button.click()
     window.server_tabs.setCurrentIndex(1)
     app.processEvents()
-    window.geo_button.click()
-    assert geo_calls == [{"all_nodes": True}, {"all_nodes": True}]
+    assert not hasattr(window, "geo_button")
     assert window.route_actions.isHidden()
     assert window.delay_button.isVisible()
     window.connected = False
@@ -223,7 +219,7 @@ def test_network_tag_tracks_actual_probe_while_navigation_remains_usable(tmp_pat
     assert window.network_tag.property("state") == "checking"
     wait(app, lambda: not window.inspections)
     assert window.network_tag.property("state") == "ok"
-    assert "Сеть доступна" == window.network_tag.text()
+    assert "Включено" == window.network_tag.text()
     assert window.network_checked_wall > 0 and "HTTPS" in window.network_tag.toolTip()
 
     def fail():
@@ -260,8 +256,8 @@ def test_server_checks_remain_visible_in_same_footer_for_both_tabs(tmp_path):
         for index in (0, 1):
             window.server_tabs.setCurrentIndex(index)
             app.processEvents()
-            assert window.delay_button.isVisible() and window.geo_button.isVisible()
-            positions.append(window.geo_button.mapTo(window, QPoint(0, 0)).y())
+            assert window.delay_button.isVisible() and not hasattr(window, "geo_button")
+            positions.append(window.delay_button.mapTo(window, QPoint(0, 0)).y())
         assert positions[0] == positions[1]
     finally:
         window.close()

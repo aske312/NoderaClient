@@ -1,4 +1,4 @@
-param([switch]$Clean, [switch]$Installer)
+param([switch]$Clean, [switch]$Installer, [switch]$TestBuild)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Push-Location -LiteralPath $projectRoot
@@ -10,7 +10,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Application icon preparation failed' }
     & $pythonPath scripts/prepare_licenses.py
     if ($LASTEXITCODE -ne 0) { throw 'Runtime license preparation failed' }
-    $metadata = (& $pythonPath scripts/build_metadata.py) | ConvertFrom-Json
+    if ($TestBuild -and $Installer) { throw 'The release installer cannot install a test build.' }
+    $channel = if ($TestBuild) { 'test' } else { 'release' }
+    $metadata = (& $pythonPath scripts/build_metadata.py --channel $channel) | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0) { throw 'Build metadata generation failed' }
     if ($metadata.artifact_id -notmatch '^\d{8}-\d{6}-\d{6}$') { throw 'Invalid artifact ID' }
     $buildOutput = Join-Path $projectRoot ('dist\builds\' + $metadata.artifact_id)
@@ -27,11 +29,12 @@ try {
     $shortcut.TargetPath = $appPath
     $shortcut.WorkingDirectory = Split-Path -Parent $appPath
     $shortcut.IconLocation = $iconPath + ',0'
-    $shortcut.Description = 'Nodera'
+    $shortcut.Description = if ($TestBuild) { 'Nodera Test' } else { 'Nodera' }
     $shortcut.Save()
-    Move-Item -LiteralPath $temporaryShortcut -Destination (Join-Path $projectRoot 'dist\Nodera.lnk') -Force
+    $shortcutName = if ($TestBuild) { 'Nodera-Test.lnk' } else { 'Nodera.lnk' }
+    Move-Item -LiteralPath $temporaryShortcut -Destination (Join-Path $projectRoot ('dist\' + $shortcutName)) -Force
     Write-Output ('Portable application: ' + $appPath + ' (distribute the entire Nodera directory)')
-    Write-Output 'Latest build shortcut: dist\Nodera.lnk'
+    Write-Output ('Latest build shortcut: dist\' + $shortcutName)
     if ($Installer) {
         & $pythonPath scripts/prepare_installer_bundle.py --source (Split-Path -Parent $appPath)
         if ($LASTEXITCODE -ne 0) { throw 'Installer payload manifest preparation failed' }

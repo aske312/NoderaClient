@@ -9,6 +9,7 @@ from datetime import datetime
 from urllib.parse import urlsplit
 
 from PySide6.QtCore import (
+    QEvent,
     QSignalBlocker,
     Qt,
     QThread,
@@ -17,6 +18,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QFrame,
     QLayout,
@@ -27,6 +29,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QStackedWidget,
     QSystemTrayIcon,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -43,7 +46,7 @@ from nodera.locations import country
 from nodera.models import ClientError
 from nodera.navigation import NavigationDock
 from nodera.presentation import PresentationMixin
-from nodera.profile_view import effective_tun
+from nodera.profile_view import effective_tun, policy_view
 from nodera.profile_view import format_bytes as size_text
 from nodera.profiles_ui import ProfilesMixin
 from nodera.routes import route_for_node
@@ -97,6 +100,10 @@ class MainWindow(
         self.poll_task = None
         self.inspections = {}
         self.geo_task = None
+        self.pending_geo_profiles = {}
+        self.geo_render_timer = QTimer(self)
+        self.geo_render_timer.setSingleShot(True)
+        self.geo_render_timer.timeout.connect(self.refresh_location_views)
         self.geo_results = {}
         self.delay_results = {}
         self.geo_client = GeoClient(store.root)
@@ -161,9 +168,11 @@ class MainWindow(
         self.timer.timeout.connect(self.poll)
         self.timer.start()
         self.delay_timer = QTimer(self)
-        self.delay_timer.setInterval(60000)
+        self.delay_timer.setInterval(15000)
         self.delay_timer.timeout.connect(self.periodic_delays)
         self.delay_timer.start()
+        self.flow_timer = QTimer(self)
+        self.flow_timer.timeout.connect(self.capture_flows)
         self.log_timer = QTimer(self)
         self.log_timer.setInterval(500)
         self.log_timer.timeout.connect(self.ingest_core_logs)
@@ -203,6 +212,26 @@ class MainWindow(
         if QSystemTrayIcon.isSystemTrayAvailable():
             self.tray.show()
         self.refresh_controls()
+        QApplication.instance().installEventFilter(self)
+
+        QTimer.singleShot(0, self.check_saved_profile_locations)
+
+    def check_saved_profile_locations(self):
+        if not self.closing:
+            for profile in self.library.profiles:
+                self.schedule_location_check(profile)
+
+    def eventFilter(self, watched, event):
+        if (
+            event.type() == QEvent.Type.ToolTip
+            and not self.closing
+            and self.stack.currentIndex() in (4, 6, 8)
+            and isinstance(watched, QWidget)
+            and (watched is self or self.isAncestorOf(watched))
+        ):
+            event.accept()
+            return True
+        return super().eventFilter(watched, event)
 
     def page(self, title, map_background=False):
         page = WorldCanvas() if map_background else QWidget()
@@ -224,12 +253,16 @@ class MainWindow(
         return layout
 
     def navigate(self, index):
+        if index in self.navigation.subscription_pages and not self.library.profiles:
+            index = 0
         if index in (3, 5):
             self.settings_tabs.setCurrentWidget(
                 self.events_section if index == 3 else self.diagnostics_section
             )
             index = 2
         self.stack.setCurrentIndex(index)
+        if index in (4, 6, 8):
+            QToolTip.hideText()
         if index == 2:
             self.refresh_autostart()
         self.navigation.set_current(index)
@@ -241,7 +274,7 @@ class MainWindow(
         if index == 8:
             self.render_flows(force=True)
             if hasattr(self, "timer") and self.connected:
-                self.poll()
+                self.capture_flows()
 
     def reveal(self):
         self.showNormal()
@@ -292,6 +325,12 @@ class MainWindow(
     def refresh_controls(self):
         if self.profile:
             self.library = self.library.upsert(self.profile)
+        has_subscription = bool(self.library.profiles)
+        self.navigation.set_has_subscription(has_subscription)
+        self.open_profile.setVisible(has_subscription)
+        self.dashboard_update_button.setVisible(has_subscription)
+        if not has_subscription and self.stack.currentIndex() in self.navigation.subscription_pages:
+            self.navigate(0)
         idle = self.task is None and not self.connected and not self.closing
         for widget in self.network_settings_controls:
             widget.setting_row.setEnabled(True)
@@ -321,6 +360,7 @@ class MainWindow(
         )
         self.profile_list.setEnabled(self.task is None and not self.closing)
         self.profile_selector.setEnabled(self.task is None and not self.closing)
+        self.connections_profile_selector.setEnabled(self.task is None and not self.closing)
         self.power.setEnabled(self.task is None and not self.closing and self.profile is not None)
         self.power.setChecked(self.connected)
         self.rules_apply_button.setEnabled(
@@ -429,6 +469,7 @@ class MainWindow(
         previous = self.group_combo.currentData()
         scroll = self.node_list.verticalScrollBar().value()
         self.groups_data = groups
+        self.connections_strategy_tag.setText(policy_view(self.display_profile())["strategy"])
         blocker = QSignalBlocker(self.group_combo)
         names = [group["name"] for group in groups]
         if names != [self.group_combo.itemData(index) for index in range(self.group_combo.count())]:
@@ -453,6 +494,12 @@ class MainWindow(
 
     def render_nodes(self, *_):
         previous = self.current_node()
+        profile = self.display_profile()
+        geo_results = self.geo_for_profile()
+        definitions = (
+            {node["name"]: node for node in profile.config.get("proxies", [])} if profile else {}
+        )
+        choices = self.current_choices()
         blocker = QSignalBlocker(self.node_list)
         scroll = self.node_list.verticalScrollBar().value()
         group = self.current_group()
@@ -506,27 +553,18 @@ class MainWindow(
                 elif self.node_list.row(item) != position:
                     self.node_list.takeItem(self.node_list.row(item))
                     self.node_list.insertItem(position, item)
-                geo = self.geo_for_profile().get(node["name"], {})
+                geo = geo_results.get(node["name"], {})
                 address = next((row for row in geo.get("rows", []) if row.get("ip")), {})
                 place = address.get("country", "")
                 geo_text = " ".join(
                     filter(None, [address.get("ip", ""), place, address.get("city", "")])
                 )
-                definition = next(
-                    (
-                        entry
-                        for entry in self.display_profile().config.get("proxies", [])
-                        if entry["name"] == node["name"]
-                    ),
-                    {},
-                )
+                definition = definitions.get(node["name"], {})
                 if not geo_text and definition.get("server"):
                     geo_text = str(definition["server"]) + (
                         ":" + str(definition["port"]) if definition.get("port") else ""
                     )
-                codes = node_countries(
-                    self.display_profile(), node["name"], geo, self.current_choices()
-                )
+                codes = node_countries(profile, node["name"], geo, choices)
                 text = f"{node['name']}\n{node['type']} ? {delay}{active}\n{geo_text}"
                 if item.text() != text:
                     item.setText(text)
@@ -618,7 +656,6 @@ class MainWindow(
         self.delay_button.setEnabled(
             bool(idle and self.connected and self.profile and "delays" not in self.inspections)
         )
-        self.geo_button.setEnabled(bool(idle and self.profile and not self.geo_task))
         self.refresh_servers_button.setEnabled(idle and self.connected)
         self.location_button.setEnabled(
             bool(
@@ -846,10 +883,10 @@ class MainWindow(
         state = self.network_state if self.connected else "off"
         text = {
             "off": "Отключено",
-            "unverified": "Сеть не проверена",
+            "unverified": "Включено",
             "checking": "Проверяем сеть…",
-            "ok": "Сеть доступна",
-            "error": "Сбой проверки сети",
+            "ok": "Включено",
+            "error": "Проблемы сети",
         }[state]
         self.network_tag.setText(text)
         self.network_tag.setProperty("state", state)
@@ -974,12 +1011,16 @@ class MainWindow(
         self.navigation_status.setText(self.state.text())
         self.update_route_pill()
         if verify:
+            self.flow_timer.start(self.settings.flow_poll_seconds * 1000)
+            QTimer.singleShot(0, self.capture_flows)
+            self.schedule_location_check()
             self.check_connection()
             QTimer.singleShot(0, self.periodic_delays)
 
     def set_disconnected(self):
+        self.flow_timer.stop()
         self.delay_results.clear()
-        self.delay_status.setText("Все маршруты · Автопроверка после подключения, каждые 60 с")
+        self.delay_status.setText("Задержка · Автопроверка после подключения, каждые 15 с")
         self.flow_monitor.clear()
         self.connected = False
         self.refresh_session_visibility()
@@ -1030,7 +1071,8 @@ class MainWindow(
             self.stats[0].setText(size_text(data["download"]))
             self.stats[1].setText(size_text(data["upload"]))
             self.stats[2].setText(str(data["connections"]))
-            self.flow_monitor.update(data.get("flows", []))
+            if not self.flow_timer.isActive():
+                self.flow_monitor.update(data.get("flows", []))
             self.render_flows()
             self.stat_rates[0].setText(f"↓ {size_text(data['download_rate'])}/с")
             self.stat_rates[1].setText(f"↑ {size_text(data['upload_rate'])}/с")
@@ -1173,6 +1215,7 @@ class MainWindow(
             )
             return
         self.tray.hide()
+        QApplication.instance().removeEventFilter(self)
         event.accept()
         if not self.shutdown_emitted:
             self.shutdown_emitted = True

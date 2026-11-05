@@ -241,3 +241,36 @@ class ComboBox(QComboBox):
             super().wheelEvent(event)
         else:
             event.ignore()
+
+
+class SubscriptionSelector(ComboBox):
+    """Fit the selected subscription name while keeping full names accessible."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("profilePicker")
+        self.setAccessibleName("Текущая подписка")
+        self.setFixedHeight(30)
+        self.currentIndexChanged.connect(self.fit_text)
+
+    def set_profile_name(self, index, name):
+        self.setItemText(index, name if len(name) <= 18 else name[:17] + "…")
+        self.setItemData(index, name, Qt.ItemDataRole.ToolTipRole)
+        self.setItemData(index, name, Qt.ItemDataRole.AccessibleTextRole)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.fit_text()
+
+    def fit_text(self, *_):
+        self.ensurePolished()
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        text_rect = self.style().subControlRect(
+            QStyle.ComplexControl.CC_ComboBox, option, QStyle.SubControl.SC_ComboBoxEditField, self
+        )
+        chrome = max(42, self.width() - text_rect.width())
+        self.setFixedWidth(self.fontMetrics().horizontalAdvance(self.currentText()) + chrome)
+        name = self.itemData(self.currentIndex(), Qt.ItemDataRole.ToolTipRole) or ""
+        self.setToolTip(name)
+        self.setAccessibleDescription(name)

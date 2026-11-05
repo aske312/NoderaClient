@@ -11,9 +11,13 @@ from pathlib import Path
 from nodera.models import ClientError, Profile, ProfileLibrary, Settings
 
 
-def data_directory() -> Path:
+def data_directory(*, development: bool = False, testing: bool = False) -> Path:
     if os.name != "nt":
         raise ClientError("Nodera поддерживает Windows.")
+    if development:
+        return Path(__file__).resolve().parents[1] / "artifacts" / "dev-data"
+    if testing:
+        return Path(os.environ["LOCALAPPDATA"]) / "NoderaClient-Test"
     return Path(os.environ["LOCALAPPDATA"]) / "NoderaClient"
 
 

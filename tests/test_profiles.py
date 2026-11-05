@@ -48,7 +48,9 @@ def test_clean_install_has_no_profiles_and_never_fetches_subscription(tmp_path, 
         app.processEvents()
 
 
-def test_empty_subscription_page_offers_add_button_instead_of_empty_list(tmp_path, monkeypatch):
+def test_first_subscription_is_added_from_home_before_subscription_page_is_available(
+    tmp_path, monkeypatch
+):
     app = QApplication.instance() or QApplication([])
     window = MainWindow(Store(tmp_path), Settings(geo_auto=False, update_hours=0), None)
     window.timer.stop()
@@ -59,13 +61,16 @@ def test_empty_subscription_page_offers_add_button_instead_of_empty_list(tmp_pat
     window.navigate(1)
     app.processEvents()
     try:
-        assert window.profile_empty.isVisible()
+        assert window.stack.currentIndex() == 0
+        assert window.nav[1].isHidden()
+        assert window.profile_add.isVisible()
         assert not window.profile_list.isVisible()
         assert not window.profile_actions.isVisible()
-        window.empty_profile_add.click()
+        window.profile_add.click()
         assert opened == [True]
         window.profile = profile("Personal")
         window.refresh_profile()
+        window.navigate(1)
         app.processEvents()
         assert not window.profile_empty.isVisible()
         assert window.profile_list.isVisible()
@@ -81,8 +86,8 @@ def test_subscription_display_has_no_provider_badge(tmp_path):
     window = MainWindow(Store(tmp_path), Settings(update_hours=0), saved)
     try:
         item = window.profile_list.item(0)
-        assert item.text().startswith("Personal\nMihomo ·")
-        assert item.toolTip() == "Personal\nПодписка Mihomo"
+        assert item.text().startswith("Personal\n1 подключение")
+        assert item.toolTip() == "Personal"
         assert saved.url not in item.text() + item.toolTip()
     finally:
         window.close()

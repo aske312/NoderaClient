@@ -584,6 +584,21 @@ class Core:
             trust_env=False,
         )
 
+    def connection_snapshot(self) -> list:
+        # Read-only capture must not wait for route reconfiguration to finish.
+        if not self.running:
+            raise ClientError("Ядро остановилось. Подключитесь повторно.")
+        with Controller(self.port, self.secret) as controller:
+            data = controller.request("GET", "/connections")
+        if not isinstance(data, dict):
+            raise ClientError("Ядро вернуло некорректный список соединений.")
+        connections = data.get("connections")
+        if connections is None:
+            connections = []
+        if not isinstance(connections, list):
+            raise ClientError("Ядро вернуло некорректный список соединений.")
+        return connections
+
     @serialized
     def status(self) -> dict:
         if not self.running:

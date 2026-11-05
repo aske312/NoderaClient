@@ -9,6 +9,7 @@ from nodera.widgets import label, line_icon
 
 class NavigationDock(QFrame):
     selected = Signal(int)
+    subscription_pages = frozenset({1, 4, 6, 8})
 
     def __init__(self, window):
         super().__init__(window)
@@ -18,9 +19,10 @@ class NavigationDock(QFrame):
         layout.setSpacing(2)
         self.buttons = {}
         self.shortcuts = []
+        self.page_shortcuts = {}
         self.pages = {
             0: ("Главная", "home"),
-            4: ("Серверы", "servers"),
+            4: ("Подключения", "servers"),
             1: ("Подписки", "profile"),
             6: ("Правила", "routes"),
             8: ("Соединения", "connections"),
@@ -37,7 +39,7 @@ class NavigationDock(QFrame):
             button.setAccessibleName(title)
             button.setToolTip(f"{title} · Ctrl+{shortcut}")
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-            button.setFixedSize(94, 32)
+            button.setFixedSize(126 if index == 4 else 94, 32)
             button.setCheckable(True)
             button.clicked.connect(lambda checked=False, page=index: self.selected.emit(page))
             self.buttons[index] = button
@@ -45,6 +47,7 @@ class NavigationDock(QFrame):
             key = QShortcut(QKeySequence(f"Ctrl+{shortcut}"), window)
             key.activated.connect(lambda page=index: self.selected.emit(page))
             self.shortcuts.append(key)
+            self.page_shortcuts[index] = key
         divider = QFrame()
         divider.setObjectName("dockDivider")
         divider.setFixedSize(1, 18)
@@ -109,6 +112,13 @@ class NavigationDock(QFrame):
         self.palette.hide()
         self.selected.emit(index)
 
+    def set_has_subscription(self, available):
+        for index in self.subscription_pages:
+            self.buttons[index].setVisible(available)
+            self.buttons[index].setEnabled(available)
+            if index in self.page_shortcuts:
+                self.page_shortcuts[index].setEnabled(available)
+
     def set_current(self, index):
         self.current_index = index
         for page, button in self.buttons.items():
@@ -135,4 +145,5 @@ class NavigationDock(QFrame):
         y = max(screen.top() + 8, anchor.y() - self.palette.height() - 8)
         self.palette.move(x, y)
         self.palette.show()
-        self.buttons[self.current_index if self.current_index in (6, 8, 2, 7) else 6].setFocus()
+        entries = [index for index in (6, 8, 2, 7) if not self.buttons[index].isHidden()]
+        self.buttons[self.current_index if self.current_index in entries else entries[0]].setFocus()

@@ -27,7 +27,7 @@ def selector(values, current):
     for caption, value in values:
         widget.addItem(caption, value)
     widget.setCurrentIndex(max(0, widget.findData(current)))
-    widget.setFixedWidth(230)
+    widget.setFixedWidth(190)
     return widget
 
 
@@ -35,10 +35,10 @@ def section(column, title):
     frame = QFrame()
     frame.setObjectName("settingsCard")
     layout = QVBoxLayout(frame)
-    layout.setContentsMargins(0, 0, 0, 4)
+    layout.setContentsMargins(0, 0, 0, 3)
     layout.setSpacing(0)
     heading = label(title, "eyebrow")
-    heading.setContentsMargins(14, 10, 14, 2)
+    heading.setContentsMargins(12, 8, 12, 2)
     layout.addWidget(heading)
     column.addWidget(frame)
     return layout
@@ -46,17 +46,17 @@ def section(column, title):
 
 def setting(layout, caption, field, detail=""):
     frame = QWidget()
+    frame.setObjectName("settingRow")
     row = QHBoxLayout(frame)
-    row.setContentsMargins(14, 7, 14, 7)
-    row.setSpacing(16)
-    text = QVBoxLayout()
-    text.setSpacing(2)
-    caption_label = label(caption, wrap=True)
+    row.setContentsMargins(12, 3, 12, 3)
+    row.setSpacing(12)
+    caption_label = label(caption)
     caption_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-    text.addWidget(caption_label)
     if detail:
-        text.addWidget(label(detail, "muted", True))
-    row.addLayout(text, 1)
+        caption_label.setToolTip(detail)
+        field.setToolTip(detail)
+        field.setAccessibleDescription(detail)
+    row.addWidget(caption_label, 1)
     row.addWidget(field, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
     field.setAccessibleName(caption)
     field.setting_row = frame
@@ -68,7 +68,7 @@ def number(value, maximum, step=1):
     widget.setRange(0, maximum)
     widget.setSingleStep(step)
     widget.setValue(value)
-    widget.setFixedWidth(150)
+    widget.setFixedWidth(130)
     return widget
 
 
@@ -81,13 +81,17 @@ def switch(value):
 def build_settings(self):
     layout = self.page("Настройки")
     self.settings_tabs = QTabWidget()
+    self.settings_tabs.setObjectName("compactSettings")
+    self.settings_tabs.setDocumentMode(True)
+    self.settings_tabs.tabBar().setDrawBase(False)
     layout.addWidget(self.settings_tabs, 1)
     pages = []
-    for title in ("Основное", "Сеть", "Карта", "Запись логов"):
+    for title in ("Приложение", "Сеть", "Карта", "Журналы"):
         page = QWidget()
+        page.setObjectName("settingsPage")
         column = QVBoxLayout(page)
-        column.setContentsMargins(4, 8, 4, 4)
-        column.setSpacing(8)
+        column.setContentsMargins(0, 6, 0, 0)
+        column.setSpacing(6)
         self.settings_tabs.addTab(page, title)
         pages.append(column)
     general, network, mapping, logging = pages
@@ -136,7 +140,7 @@ def build_settings(self):
     self.flow_poll_setting = selector(
         [(f"{value} с", value) for value in (1, 2, 3, 5, 10)], self.settings.flow_poll_seconds
     )
-    setting(form, "Опрос на странице соединений", self.flow_poll_setting)
+    setting(form, "Обновлять список соединений", self.flow_poll_setting)
     self.flow_history_setting = selector(
         [(f"{value} мин", value) for value in (1, 5, 15, 30)], self.settings.flow_history_minutes
     )
@@ -162,9 +166,9 @@ def build_settings(self):
     self.geo_auto_check = switch(self.settings.geo_auto)
     setting(
         form,
-        "Проверять IP активных маршрутов",
+        "Обновлять IP в фоне",
         self.geo_auto_check,
-        "ipwho.is · Приблизительная страна и город по IP",
+        "Периодическая проверка активных маршрутов. При подключении и обновлении подписки IP проверяются всегда.",
     )
     flush = self.flush_dns_button = QPushButton("Очистить")
     flush.clicked.connect(
@@ -175,34 +179,32 @@ def build_settings(self):
         )
     )
     setting(form, "DNS-кэш ядра", flush)
-    network_note = label("Изменения портов, TUN и IPv6 — при следующем подключении.", "muted", True)
-    network_note.setContentsMargins(16, 4, 16, 4)
-    network.addWidget(network_note)
     network.addStretch()
 
     form = section(mapping, "Карта маршрута")
     self.map_auto_zoom_check = switch(self.settings.map_auto_zoom)
     setting(form, "Приближать карту к точкам", self.map_auto_zoom_check)
     self.client_country_setting = ComboBox()
-    self.client_country_setting.setFixedWidth(230)
+    self.client_country_setting.setFixedWidth(190)
     self.client_country_setting.addItem(QIcon(flag_pixmap("xx")), "Точка не задана", "")
     for code, place in sorted(map_data()["countries"].items(), key=lambda pair: pair[1]["name"]):
         self.client_country_setting.addItem(QIcon(flag_pixmap(code)), place["name"], code)
     setting(form, "Страна клиента", self.client_country_setting)
     self.client_name_setting = QLineEdit()
-    self.client_name_setting.setFixedWidth(230)
+    self.client_name_setting.setFixedWidth(190)
     self.client_name_setting.setMaxLength(80)
     self.client_name_setting.setPlaceholderText("Город / подпись")
     setting(form, "Подпись точки", self.client_name_setting)
     coordinates = QWidget()
     coordinate_row = QHBoxLayout(coordinates)
     coordinate_row.setContentsMargins(0, 0, 0, 0)
+    coordinate_row.setSpacing(6)
     self.client_lat_setting, self.client_lon_setting = CoordinateBox(), CoordinateBox()
     for field, limit in ((self.client_lat_setting, 90), (self.client_lon_setting, 180)):
         field.setRange(-limit, limit)
         field.setDecimals(4)
         field.setSingleStep(0.01)
-        field.setFixedWidth(110)
+        field.setFixedWidth(92)
         coordinate_row.addWidget(field)
     self.client_lat_setting.setAccessibleName("Широта клиента")
     self.client_lon_setting.setAccessibleName("Долгота клиента")
@@ -222,7 +224,7 @@ def build_settings(self):
     self.detect_client_button.clicked.connect(lambda: detect_point(self))
     setting(form, "Местоположение клиента", self.detect_client_button)
     self.client_point_result = label(
-        "По IP, приблизительно. Определяется один раз автоматически; можно уточнить вручную.",
+        "",
         "muted",
         True,
     )
@@ -284,8 +286,11 @@ def build_settings(self):
     for field in (self.connection_log_size, self.connection_log_interval_setting):
         field.setting_row.setEnabled(self.connection_log_check.isChecked())
     logging.addStretch()
+    for column in (network, mapping):
+        for widget in column.parentWidget().findChildren(QWidget):
+            widget.setToolTip("")
     row = QHBoxLayout()
-    self.save_button = QPushButton("Сохранить")
+    self.save_button = QPushButton("Применить")
     self.save_button.setObjectName("primary")
     self.save_button.clicked.connect(self.save_settings)
     row.addWidget(self.save_button)

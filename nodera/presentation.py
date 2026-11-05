@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from nodera.controls import ComboBox as QComboBox
+from nodera.controls import SubscriptionSelector
 from nodera.geolocation import verified_locations
 from nodera.profile_view import effective_tun, format_bytes, policy_view, quota_view
 from nodera.routes import active_route_views, route_text
@@ -40,22 +41,20 @@ class PresentationMixin:
         identity.setSpacing(2)
         self.profile_title = label("Нет профиля", "dashboardProfile")
         self.profile_title.hide()
-        self.profile_selector = QComboBox()
-        self.profile_selector.setObjectName("profilePicker")
-        self.profile_selector.setAccessibleName("Текущая подписка")
-        self.profile_selector.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-        )
-        self.profile_selector.setMinimumContentsLength(8)
-        self.profile_selector.setFixedWidth(220)
-        self.profile_selector.setFixedHeight(30)
+        self.profile_selector = SubscriptionSelector()
         self.profile_selector.currentIndexChanged.connect(
             lambda: self.switch_profile(self.profile_selector.currentData())
         )
         self.profile_details = label("", "muted")
         self.profile_details.hide()
         identity.addWidget(self.profile_title)
-        identity.addWidget(self.profile_selector, alignment=Qt.AlignmentFlag.AlignLeft)
+        subscription = QHBoxLayout()
+        subscription.setSpacing(6)
+        subscription.addWidget(self.profile_selector)
+        self.home_pro_badge = label("PRO", "proBadge")
+        subscription.addWidget(self.home_pro_badge, 0, Qt.AlignmentFlag.AlignVCenter)
+        subscription.addStretch()
+        identity.addLayout(subscription)
         self.profile_add = AddProfileButton()
         self.profile_add.setObjectName("addProfile")
         self.profile_add.setAccessibleName("Добавить подписку")
@@ -133,8 +132,8 @@ class PresentationMixin:
         center_layout = QVBoxLayout(center)
         center_layout.setContentsMargins(0, 0, 0, 0)
         center_layout.setSpacing(6)
-        center_layout.addWidget(self.network_tag, 0, Qt.AlignmentFlag.AlignHCenter)
         center_layout.addWidget(self.power, 0, Qt.AlignmentFlag.AlignHCenter)
+        center_layout.addWidget(self.network_tag, 0, Qt.AlignmentFlag.AlignHCenter)
         controls.addWidget(center, 0, 1, Qt.AlignmentFlag.AlignCenter)
         self.session_panel = QWidget()
         session_policy = self.session_panel.sizePolicy()
@@ -214,7 +213,7 @@ class PresentationMixin:
     def refresh_session_visibility(self):
         self.traffic_panel.setVisible(self.connected)
         self.session_panel.setVisible(self.connected and self.session_tun)
-        self.route_panel.setVisible(self.connected and self.profile is not None)
+        self.route_panel.hide()
 
     def build_routes(self):
         layout = self.page("Правила")

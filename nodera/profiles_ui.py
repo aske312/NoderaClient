@@ -9,7 +9,9 @@ from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
@@ -18,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from nodera.dialogs import SubscriptionDialog
 from nodera.models import ClientError, ProfileLibrary
+from nodera.profile_view import format_bytes, is_pro_subscription
 from nodera.subscription import fetch_profile
 from nodera.widgets import AddProfileButton, label
 
@@ -49,11 +52,9 @@ class ProfilesMixin:
         return self.profile
 
     def fetch_subscription(self, url, name):
-        proxy = (
-            f"http://127.0.0.1:{self.core.mixed_port}"
-            if self.connected and not self.session_tun and self.core.mixed_port
-            else None
-        )
+        proxy = getattr(self, "subscription_proxy", None) if not self.connected else None
+        if self.connected and not self.session_tun and self.core.mixed_port:
+            proxy = f"http://127.0.0.1:{self.core.mixed_port}"
         return fetch_profile(
             url,
             name,
@@ -65,17 +66,79 @@ class ProfilesMixin:
     def build_profile(self):
         layout = self.page("Подписки")
         row = QHBoxLayout()
-        row.addWidget(label("Сохранённые профили", "muted"), 1)
-        self.import_button = QPushButton("Добавить")
+        self.library_count = label("", "muted")
+        row.addWidget(self.library_count, 1)
+        self.import_button = QPushButton("Добавить подписку")
         self.import_button.setObjectName("primary")
         self.import_button.clicked.connect(self.import_profile)
         row.addWidget(self.import_button)
         layout.addLayout(row)
+        content = QHBoxLayout()
+        content.setSpacing(10)
+        sidebar = QVBoxLayout()
+        sidebar.setSpacing(8)
+        self.profile_search = QLineEdit()
+        self.profile_search.setPlaceholderText("Найти подписку")
+        self.profile_search.setAccessibleName("Поиск подписок")
+        self.profile_search.textChanged.connect(self.filter_profiles)
+        sidebar.addWidget(self.profile_search)
         self.profile_list = QListWidget()
         self.profile_list.setObjectName("subscriptionList")
+        self.profile_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.profile_list.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.profile_list.setMinimumWidth(210)
+        self.profile_list.setMaximumWidth(270)
         self.profile_list.setAccessibleName("Сохранённые подписки")
         self.profile_list.currentItemChanged.connect(self.select_profile_item)
-        layout.addWidget(self.profile_list, 1)
+        sidebar.addWidget(self.profile_list, 1)
+        content.addLayout(sidebar, 1)
+        self.profile_actions = QFrame()
+        self.profile_actions.setObjectName("subscriptionDetail")
+        detail = QVBoxLayout(self.profile_actions)
+        detail.setContentsMargins(14, 14, 14, 14)
+        detail.setSpacing(10)
+        heading = QHBoxLayout()
+        self.profile_summary_title = label("", "subscriptionName", True)
+        heading.addWidget(self.profile_summary_title, 1)
+        self.profile_pro_badge = label("PRO", "proBadge")
+        heading.addWidget(self.profile_pro_badge)
+        heading.addWidget(label("Текущая", "badge"))
+        detail.addLayout(heading)
+        metrics = QGridLayout()
+        metrics.setHorizontalSpacing(20)
+        metrics.setVerticalSpacing(5)
+        self.profile_summary_nodes = label("—", "summaryValue")
+        self.profile_summary_remaining = label("—", "summaryValue")
+        self.profile_summary_expiry = label("—", "summaryValue")
+        for column, (caption, value) in enumerate(
+            (
+                ("Подключения", self.profile_summary_nodes),
+                ("Осталось трафика", self.profile_summary_remaining),
+                ("Действует до", self.profile_summary_expiry),
+            )
+        ):
+            metrics.addWidget(label(caption, "muted"), 0, column)
+            metrics.addWidget(value, 1, column)
+        detail.addLayout(metrics)
+        self.subscription_info = label("Нет подписок", "muted", True)
+        detail.addWidget(self.subscription_info)
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        self.update_button = QPushButton("Обновить")
+        self.update_button.setObjectName("primary")
+        self.update_button.clicked.connect(self.update_profile)
+        self.rename_profile_button = QPushButton("Название")
+        self.rename_profile_button.setAccessibleName("Переименовать подписку")
+        self.rename_profile_button.clicked.connect(self.rename_profile)
+        self.delete_button = QPushButton("Удалить")
+        self.delete_button.setObjectName("dangerAction")
+        self.delete_button.clicked.connect(self.delete_profile)
+        for button in (self.update_button, self.rename_profile_button, self.delete_button):
+            row.addWidget(button)
+        row.addStretch()
+        detail.addLayout(row)
+        content.addWidget(self.profile_actions, 2, Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(content)
         self.profile_empty = QFrame()
         empty = QVBoxLayout(self.profile_empty)
         empty.setSpacing(10)
@@ -89,26 +152,19 @@ class ProfilesMixin:
         empty.addWidget(label("Добавить подписку", "profileName"), 0, Qt.AlignmentFlag.AlignHCenter)
         empty.addStretch()
         layout.addWidget(self.profile_empty, 1)
-        self.subscription_info = label("Нет подписок", "muted", True)
-        layout.addWidget(self.subscription_info)
-        self.profile_actions = QFrame()
-        row = QHBoxLayout(self.profile_actions)
-        row.setContentsMargins(0, 0, 0, 0)
-        self.update_button = QPushButton("Обновить")
-        self.update_button.clicked.connect(self.update_profile)
-        self.rename_profile_button = QPushButton("Переименовать")
-        self.rename_profile_button.clicked.connect(self.rename_profile)
-        self.delete_button = QPushButton("Удалить")
-        self.delete_button.clicked.connect(self.delete_profile)
-        for button in (self.update_button, self.rename_profile_button, self.delete_button):
-            row.addWidget(button)
-        row.addStretch()
-        layout.addWidget(self.profile_actions)
+        layout.addStretch(1)
+
+    def filter_profiles(self):
+        query = self.profile_search.text().strip().casefold()
+        for index in range(self.profile_list.count()):
+            item = self.profile_list.item(index)
+            item.setHidden(query not in item.text().casefold())
 
     def refresh_library(self):
         if self.profile:
             self.library = self.library.upsert(self.profile)
-        blockers = [QSignalBlocker(self.profile_list), QSignalBlocker(self.profile_selector)]
+        selectors = (self.profile_selector, self.connections_profile_selector)
+        blockers = [QSignalBlocker(widget) for widget in (self.profile_list, *selectors)]
         ids = [profile.id for profile in self.library.profiles]
         if ids != [
             self.profile_list.item(index).data(Qt.ItemDataRole.UserRole)
@@ -119,32 +175,70 @@ class ProfilesMixin:
                 item = QListWidgetItem()
                 item.setData(Qt.ItemDataRole.UserRole, profile.id)
                 self.profile_list.addItem(item)
-        if ids != [
-            self.profile_selector.itemData(index) for index in range(self.profile_selector.count())
-        ]:
-            self.profile_selector.clear()
-            for profile in self.library.profiles:
-                self.profile_selector.addItem(profile.name, profile.id)
+        for selector in selectors:
+            if ids != [selector.itemData(index) for index in range(selector.count())]:
+                selector.clear()
+                for profile in self.library.profiles:
+                    selector.addItem("", profile.id)
         for index, profile in enumerate(self.library.profiles):
             count = len(profile.config.get("proxies", []))
             noun = (
-                "сервер"
+                "подключение"
                 if count % 10 == 1 and count % 100 != 11
-                else "сервера"
+                else "подключения"
                 if 2 <= count % 10 <= 4 and not 12 <= count % 100 <= 14
-                else "серверов"
+                else "подключений"
             )
-            text = f"{profile.name}\nMihomo · {count} {noun}"
+            text = (
+                f"{profile.name}\n"
+                + ("PRO · " if is_pro_subscription(profile) else "")
+                + f"{count} {noun}"
+            )
             if profile.id == self.library.active_id:
                 text += " · Текущая"
             item = self.profile_list.item(index)
             if item.text() != text:
                 item.setText(text)
-            item.setToolTip(profile.name + "\nПодписка Mihomo")
-            self.profile_selector.setItemText(index, profile.name)
+            item.setToolTip(profile.name)
+            for selector in selectors:
+                selector.set_profile_name(index, profile.name)
             if profile.id == self.library.active_id:
                 self.profile_list.setCurrentItem(item)
-                self.profile_selector.setCurrentIndex(index)
+                for selector in selectors:
+                    selector.setCurrentIndex(index)
+        for selector in selectors:
+            selector.fit_text()
+        self.library_count.setText(f"Сохранено подписок: {len(self.library.profiles)}")
+        self.profile_summary_title.setText(self.profile.name if self.profile else "Нет подписки")
+        pro = is_pro_subscription(self.profile)
+        for badge in (self.profile_pro_badge, self.home_pro_badge, self.connections_pro_badge):
+            badge.setVisible(pro)
+        row_height = max(52, self.profile_list.sizeHintForRow(0))
+        self.profile_list.setFixedHeight(
+            min(6, max(2, len(self.library.profiles))) * row_height + 6
+        )
+        if self.profile:
+            usage = self.profile.usage
+            self.profile_summary_nodes.setText(str(len(self.profile.config.get("proxies", []))))
+            total = usage.get("total")
+            self.profile_summary_remaining.setText(
+                format_bytes(max(0, total - usage.get("upload", 0) - usage.get("download", 0)))
+                if total
+                else "Без лимита"
+                if total == 0
+                else "—"
+            )
+            try:
+                expiry = (
+                    datetime.fromtimestamp(usage["expire"]).strftime("%d.%m.%Y")
+                    if usage.get("expire")
+                    else "Без срока"
+                    if usage.get("expire") == 0
+                    else "—"
+                )
+            except (ValueError, OverflowError, OSError):
+                expiry = "—"
+            self.profile_summary_expiry.setText(expiry)
         self.profile_selector.setVisible(self.profile is not None)
         self.profile_add.setVisible(self.profile is None)
         has_profiles = bool(self.library.profiles)
@@ -153,6 +247,8 @@ class ProfilesMixin:
         self.profile_actions.setVisible(has_profiles)
         self.import_button.setVisible(has_profiles)
         self.subscription_info.setVisible(has_profiles)
+        self.profile_search.setVisible(has_profiles)
+        self.filter_profiles()
         del blockers
 
     def select_profile_item(self, current, previous):
@@ -178,6 +274,7 @@ class ProfilesMixin:
             self.library, self.profile = library, profile
             self.set_disconnected()
             self.refresh_profile()
+            self.schedule_location_check()
             self.update_retry_at = self.profile_retry_at.get(profile.id, 0)
             self.pending_connect = connected
             self.log("Выбрана подписка «" + profile.name + "».")
@@ -304,6 +401,7 @@ class ProfilesMixin:
                 self.rules_pending.setText("")
                 self.connection_hint = "Подписка применена без переподключения"
             self.refresh_profile()
+            self.schedule_location_check(updated)
             if groups is not None:
                 self.hint.setText(self.connection_hint)
                 self.log("Подписка обновлена и применена к текущему сеансу.")

@@ -40,3 +40,9 @@ def isolate_system_startup(monkeypatch):
         "nodera.autostart.set_enabled",
         lambda _: pytest.fail("Unit test attempted to change Windows startup"),
     )
+
+
+@pytest.fixture(autouse=True)
+def offline_automatic_route_locations(monkeypatch):
+    # Lifecycle checks are verified separately without contacting public GeoIP services.
+    monkeypatch.setattr("nodera.workbench.WorkbenchMixin.schedule_location_check", lambda *a: None)

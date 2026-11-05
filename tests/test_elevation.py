@@ -21,6 +21,14 @@ def test_startup_elevation_preserves_connect_flag(monkeypatch):
     assert "--connect" in elevation.elevation_command()[1]
 
 
+def test_development_tun_relaunch_preserves_data_isolation(monkeypatch):
+    monkeypatch.setattr(elevation.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(elevation.sys, "argv", ["main.py", "--dev"])
+    _, arguments, _ = elevation.elevation_command(wait_for_pid=200)
+    assert "--dev" in arguments
+    assert arguments[-3:] == ["--wait-for-exit", "200", "--connect"]
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows startup")
 def test_normal_startup_does_not_request_admin_or_wait(monkeypatch):
     monkeypatch.setattr(elevation.sys, "argv", ["Nodera.exe"])

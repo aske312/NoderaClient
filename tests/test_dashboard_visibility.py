@@ -85,7 +85,7 @@ def test_session_and_traffic_visibility_follow_connection_lifecycle(tmp_path, tu
         app.processEvents()
         assert window.traffic_panel.isVisible()
         assert window.session_panel.isVisible() == tun
-        assert window.route_panel.isVisible()
+        assert not window.route_panel.isVisible()
         window.set_disconnected()
         app.processEvents()
         assert not window.traffic_panel.isVisible()
@@ -165,11 +165,56 @@ def test_home_header_keeps_subscription_left_and_action_buttons_together_on_righ
             header = window.dashboard_header
             picker = window.profile_selector if has_profile else window.profile_add
             assert picker.mapTo(header, QPoint(0, 0)).x() == 8
+            assert window.open_profile.isVisible() == has_profile
+            assert window.dashboard_update_button.isVisible() == has_profile
+            if not has_profile:
+                continue
             refresh = window.dashboard_update_button.mapTo(header, QPoint(0, 0))
             subscriptions = window.open_profile.mapTo(header, QPoint(0, 0))
             assert subscriptions.x() - refresh.x() - window.dashboard_update_button.width() == 8
             assert header.width() - subscriptions.x() - window.open_profile.width() == 8
             assert subscriptions.y() == refresh.y() == picker.mapTo(header, QPoint(0, 0)).y()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_subscription_pages_follow_first_addition_and_last_removal(tmp_path):
+    from nodera.models import ProfileLibrary
+
+    app, window = make_window(tmp_path)
+    restricted = (1, 4, 6, 8)
+    try:
+        assert window.profile_add.isVisible() and window.profile_add.isEnabled()
+        for index in restricted:
+            assert window.nav[index].isHidden()
+            window.navigate(index)
+            assert window.stack.currentIndex() == 0
+        assert not window.navigation.page_shortcuts[4].isEnabled()
+        assert not window.navigation.page_shortcuts[1].isEnabled()
+        window.navigation.toggle_palette()
+        app.processEvents()
+        assert window.nav[2].isVisible() and window.nav[7].isVisible()
+        assert all(not window.nav[index].isVisible() for index in (6, 8))
+        assert window.nav[2].hasFocus()
+        window.navigation.palette.hide()
+
+        window.profile = Profile("Test", "", {"proxies": []}, "")
+        window.refresh_profile()
+        for index in restricted:
+            assert not window.nav[index].isHidden()
+            window.navigate(index)
+            assert window.stack.currentIndex() == index
+        assert window.navigation.page_shortcuts[4].isEnabled()
+        assert window.navigation.page_shortcuts[1].isEnabled()
+
+        window.profile = None
+        window.library = ProfileLibrary()
+        window.refresh_profile()
+        assert window.stack.currentIndex() == 0
+        assert window.nav[0].isChecked()
+        assert all(window.nav[index].isHidden() for index in restricted)
+        assert window.profile_add.isVisible()
     finally:
         window.close()
         app.processEvents()

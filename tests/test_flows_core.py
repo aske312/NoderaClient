@@ -1,6 +1,7 @@
 import ctypes
 import os
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -65,9 +66,25 @@ def test_real_core_exposes_client_process_domain_and_traffic(tmp_path):
         requesting = threading.Thread(target=request, daemon=True)
         requesting.start()
         assert entered.wait(8), errors
-        snapshot = core.status()
+        locked, unlock = threading.Event(), threading.Event()
+
+        def hold_reconfiguration_lock():
+            with core._operation_lock:
+                locked.set()
+                unlock.wait(3)
+
+        holding = threading.Thread(target=hold_reconfiguration_lock, daemon=True)
+        holding.start()
+        assert locked.wait(1)
+        try:
+            started = time.monotonic()
+            snapshot = core.connection_snapshot()
+            assert time.monotonic() - started < 1
+        finally:
+            unlock.set()
+            holding.join(timeout=2)
         monitor = FlowMonitor()
-        monitor.update(snapshot["flows"])
+        monitor.update(snapshot)
         captured = next(row for row in monitor.rows() if row["host"] == "flow-capture.invalid")
         image = ctypes.create_unicode_buffer(32768)
         assert ctypes.windll.kernel32.GetModuleFileNameW(None, image, len(image))

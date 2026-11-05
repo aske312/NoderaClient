@@ -8,8 +8,9 @@ import sys
 from pathlib import Path
 
 from nodera.models import ClientError
+from nodera.versioning import build_info
 
-TASK_PREFIX = "Nodera-"
+TASK_PREFIX = "Nodera-Test-" if build_info().get("channel") == "test" else "Nodera-"
 
 
 def startup_command():

@@ -47,7 +47,7 @@ def test_empty_dashboard_plus_menu_and_shared_version(tmp_path, monkeypatch):
 
 
 def test_live_application_drilldown_sites_recent_and_search(tmp_path):
-    app, window = make_window(tmp_path)
+    app, window = make_window(tmp_path, Profile("Test", "", {"proxies": []}, ""))
     window.poll = lambda: None
     window.show()
     window.connected = True

@@ -128,6 +128,7 @@ class TitleBar(QWidget):
         icon = label("")
         icon.setPixmap(app_icon().pixmap(18, 18))
         title = label("Nodera", "windowTitle")
+        window.windowTitleChanged.connect(title.setText)
         for widget in (icon, title):
             widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             layout.addWidget(widget)

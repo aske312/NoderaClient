@@ -1,7 +1,9 @@
 """Operational pages: small toolbars, stable lists and explicit background checks."""
 
 import json
+import re
 import time
+from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime
 
@@ -28,7 +30,6 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -37,6 +38,7 @@ from nodera import __version__, autostart, updater
 from nodera.bundled_core import core_manifest
 from nodera.controller import Controller
 from nodera.controls import ComboBox as QComboBox
+from nodera.controls import SubscriptionSelector
 from nodera.delay_probe import probe_delays
 from nodera.device_info import windows_identity
 from nodera.diagnostics import preflight
@@ -57,6 +59,22 @@ def combo(values, current):
     for text, value in values:
         widget.addItem(text, value)
     widget.setCurrentIndex(max(0, widget.findData(current)))
+    return widget
+
+
+def breakable_text(text):
+    """Allow labels to wrap paths and long build IDs without dropping characters."""
+    text = text.replace("\\", "\\\u200b").replace("/", "/\u200b")
+    return re.sub(r"[^\s\u200b]{32}", lambda match: match[0] + "\u200b", text)
+
+
+def wrapping_label(text, kind=""):
+    widget = label(breakable_text(text), kind, True)
+    policy = widget.sizePolicy()
+    policy.setHorizontalPolicy(QSizePolicy.Policy.Ignored)
+    policy.setHeightForWidth(True)
+    widget.setSizePolicy(policy)
+    widget.setMinimumWidth(0)
     return widget
 
 
@@ -138,19 +156,25 @@ class WorkbenchMixin:
 
     def build_application(self):
         layout = self.page("О программе")
+        panel = QWidget()
+        panel.setObjectName("applicationCard")
+        panel.setMaximumWidth(780)
+        panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        self.application_panel = panel
+        content = QVBoxLayout(panel)
+        content.setContentsMargins(18, 18, 18, 18)
+        content.setSpacing(14)
         row = QHBoxLayout()
         icon = label("")
-        icon.setPixmap(app_icon().pixmap(44, 44))
-        icon.setFixedSize(44, 44)
-        row.setSpacing(14)
+        icon.setPixmap(app_icon().pixmap(40, 40))
+        icon.setFixedSize(40, 40)
+        row.setSpacing(12)
         row.addWidget(icon)
         column = QVBoxLayout()
         column.setSpacing(2)
         column.addWidget(label("Nodera", "dashboardProfile"))
-        column.addWidget(label("Клиент для безопасных подключений", "muted"))
+        column.addWidget(label("Клиент для безопасных подключений на Windows", "muted", True))
         row.addLayout(column, 1)
-        form = QFormLayout()
-        form.setVerticalSpacing(8)
         os_name, os_release = windows_identity()
         self.application_values = {
             "Версия приложения": __version__,
@@ -161,24 +185,12 @@ class WorkbenchMixin:
             "Подписки": "Mihomo YAML · автоматическое и ручное обновление",
             "Хранение": "Локально · Windows DPAPI",
         }
-        panel = QWidget()
-        panel.setObjectName("applicationCard")
-        panel.setMaximumWidth(560)
-        panel.setMinimumWidth(420)
-        panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
-        self.application_panel = panel
-        content = QVBoxLayout(panel)
-        content.setContentsMargins(20, 20, 20, 16)
-        content.setSpacing(16)
         content.addLayout(row)
-        self.application_version = label(
-            version_text(),
-            "railDetail",
-        )
+        self.application_version = wrapping_label(version_text(), "muted")
         self.application_version.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
-        column.addWidget(self.application_version)
+        content.addWidget(self.application_version)
         divider = QFrame()
         divider.setObjectName("aboutDivider")
         divider.setFixedHeight(1)
@@ -186,21 +198,27 @@ class WorkbenchMixin:
         self.application_details = QWidget()
         details = QVBoxLayout(self.application_details)
         details.setContentsMargins(0, 0, 0, 0)
-        details.setSpacing(12)
+        details.setSpacing(10)
+        form = QFormLayout()
+        form.setVerticalSpacing(10)
+        form.setHorizontalSpacing(24)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.application_detail_values = {}
         for caption, text in (
             ("Ядро", self.application_values["Ядро"]),
             ("Система", self.application_values["Система"]),
+            ("Режимы", self.application_values["Режимы"]),
             ("Данные", str(self.store.root)),
         ):
-            value = label(text, wrap=True)
-            if caption == "Данные":
-                value.setText(
-                    value.fontMetrics().elidedText(text, Qt.TextElideMode.ElideMiddle, 260)
-                )
-                value.setToolTip(text)
+            value = wrapping_label(text)
+            value.setAccessibleDescription(text)
             value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            form.addRow(caption, value)
+            form.addRow(label(caption, "muted"), value)
+            self.application_detail_values[caption] = value
         details.addLayout(form)
+        content.addWidget(self.application_details)
         copy_info = QPushButton("Копировать сведения")
         copy_info.setObjectName("quietAction")
         copy_info.clicked.connect(
@@ -216,11 +234,18 @@ class WorkbenchMixin:
                 + f"\nДанные: {self.store.root}"
             )
         )
-        details.addWidget(copy_info, 0, Qt.AlignmentFlag.AlignLeft)
-        self.application_details.hide()
+        self.application_copy_info = copy_info
+        content.addWidget(copy_info, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(panel)
+        updates_panel = QFrame()
+        updates_panel.setObjectName("applicationUpdates")
+        updates_panel.setMaximumWidth(780)
+        update_content = QVBoxLayout(updates_panel)
+        update_content.setContentsMargins(16, 14, 16, 14)
+        update_content.setSpacing(8)
         self.available_release = None
         self.downloaded_update = None
-        self.app_update_status = label("Проверить наличие обновлений", "muted", True)
+        self.app_update_status = wrapping_label("Проверить наличие обновлений", "muted")
         updates = QHBoxLayout()
         updates.setSpacing(16)
         update_text = QVBoxLayout()
@@ -237,34 +262,15 @@ class WorkbenchMixin:
         self.app_update_install.clicked.connect(self.install_app_update)
         updates.addWidget(self.app_update_check)
         updates.addWidget(self.app_update_install)
-        content.addLayout(updates)
+        update_content.addLayout(updates)
         self.app_update_progress = QProgressBar()
         self.app_update_progress.setObjectName("aboutProgress")
         self.app_update_progress.setRange(0, 0)
         self.app_update_progress.setTextVisible(False)
         self.app_update_progress.setFixedHeight(3)
         self.app_update_progress.hide()
-        content.addWidget(self.app_update_progress)
-        self.application_details_toggle = QToolButton()
-        self.application_details_toggle.setObjectName("aboutDetails")
-        self.application_details_toggle.setText("Подробности")
-        self.application_details_toggle.setToolButtonStyle(
-            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
-        )
-        self.application_details_toggle.setCheckable(True)
-        self.application_details_toggle.setArrowType(Qt.ArrowType.RightArrow)
-
-        def toggle_details(checked):
-            self.application_details.setVisible(checked)
-            self.application_details_toggle.setArrowType(
-                Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow
-            )
-
-        self.application_details_toggle.toggled.connect(toggle_details)
-        content.addWidget(self.application_details_toggle)
-        content.addWidget(self.application_details)
-        layout.addSpacing(12)
-        layout.addWidget(panel, 0, Qt.AlignmentFlag.AlignLeft)
+        update_content.addWidget(self.app_update_progress)
+        layout.addWidget(updates_panel)
         layout.addStretch(1)
 
     def update_proxy(self):
@@ -382,11 +388,21 @@ class WorkbenchMixin:
         )
 
     def build_servers(self):
-        layout = self.page("Серверы")
+        layout = self.page("Подключения")
+        self.connections_profile_selector = SubscriptionSelector()
+        self.connections_profile_selector.currentIndexChanged.connect(
+            lambda: self.switch_profile(self.connections_profile_selector.currentData())
+        )
         bar = QHBoxLayout()
-        self.group_combo = QComboBox()
-        self.group_combo.setAccessibleName("Группа серверов")
+        bar.addWidget(self.connections_profile_selector)
+        self.connections_pro_badge = label("PRO", "proBadge")
+        bar.addWidget(self.connections_pro_badge)
+        self.connections_strategy_tag = label("", "badge")
+        bar.addWidget(self.connections_strategy_tag)
+        self.group_combo = QComboBox(self)
+        self.group_combo.setAccessibleName("Группа подключений")
         self.group_combo.currentIndexChanged.connect(self.render_nodes)
+        self.group_combo.hide()
         self.server_search = QLineEdit()
         self.server_search.setPlaceholderText("Поиск по маршрутам и адресам")
         self.server_search.textChanged.connect(self.filter_nodes)
@@ -394,13 +410,14 @@ class WorkbenchMixin:
             [("Из подписки", "profile"), ("По имени", "name"), ("По задержке", "delay")], "profile"
         )
         self.server_sort.currentIndexChanged.connect(self.render_nodes)
-        self.group_combo.setMaximumWidth(190)
+        self.group_combo.setMaximumWidth(170)
         self.server_sort.setMaximumWidth(150)
-        bar.addWidget(self.group_combo, 1)
         bar.addWidget(self.server_search, 2)
         bar.addWidget(self.server_sort)
         layout.addLayout(bar)
         self.server_tabs = QTabWidget()
+        self.server_tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+        self.server_tabs.setMinimumHeight(160)
         self.node_list = NodeList()
         self.node_list.pin_requested.connect(self.toggle_server_pin)
         self.node_list.currentRowChanged.connect(self.server_selection_changed)
@@ -441,7 +458,9 @@ class WorkbenchMixin:
         column.addWidget(copy_addresses, 0, Qt.AlignmentFlag.AlignLeft)
         shortcut = QShortcut(QKeySequence.StandardKey.Copy, self.address_table)
         shortcut.activated.connect(self.copy_addresses)
-        self.address_note = label("Выберите маршрут и нажмите «Проверить IP».", "muted", True)
+        self.address_note = label(
+            "IP проверяются автоматически при подключении и обновлении подписки.", "muted", True
+        )
         column.addWidget(self.address_note)
         self.server_tabs.addTab(addresses, "IP и маршрут")
         layout.addWidget(self.server_tabs, 1)
@@ -450,25 +469,21 @@ class WorkbenchMixin:
         self.select_button.clicked.connect(self.select_server)
         self.delay_button = QPushButton("Задержка")
         self.delay_button.setToolTip(
-            "HTTPS-проверка всех маршрутов подписки. Автоматически — каждые 60 секунд при подключении."
+            "HTTPS-проверка всех маршрутов подписки. Автоматически — каждые 15 секунд при подключении."
         )
         self.delay_button.clicked.connect(self.test_group)
         self.location_button = QPushButton("Редактировать маршрут")
         self.location_button.clicked.connect(self.choose_location)
-        self.geo_button = QPushButton("Проверить IP")
-        self.geo_button.setToolTip("Проверить IP всех маршрутов подписки")
-        self.geo_button.clicked.connect(lambda: self.check_locations(all_nodes=True))
         self.refresh_servers_button = QPushButton("Обновить")
         self.refresh_servers_button.clicked.connect(self.reload_servers)
-        self.geo_all_button = self.geo_button
         self.delay_all_button = self.delay_button
         self.geo_cancel_button = QPushButton("Остановить")
         self.geo_cancel_button.clicked.connect(self.cancel_geo)
         self.geo_cancel_button.setVisible(False)
         checks = QHBoxLayout()
-        for button in (self.delay_button, self.geo_button, self.geo_cancel_button):
+        for button in (self.delay_button, self.geo_cancel_button):
             checks.addWidget(button)
-        self.delay_status = label("Все маршруты · Задержка обновляется каждые 60 с", "muted", True)
+        self.delay_status = label("Задержка · Фоновая проверка каждые 15 с", "muted", True)
         checks.addWidget(self.delay_status, 1)
         checks.addWidget(self.refresh_servers_button)
         checks_panel = QFrame()
@@ -512,9 +527,10 @@ class WorkbenchMixin:
         if not self.profile:
             return {}
         result = {}
+        profile, choices = self.display_profile(), self.current_choices()
         for (profile_id, name), value in self.geo_results.items():
             if profile_id == self.profile.id and value.get("endpoints") == endpoint_rows(
-                self.display_profile(), name, self.current_choices()
+                profile, name, choices
             ):
                 result[name] = value
         return result
@@ -582,30 +598,66 @@ class WorkbenchMixin:
             "Скрытые адреса сгруппированы по роли; их совпадение не подтверждено."
         )
 
-    def check_locations(self, all_nodes=False, automatic=False):
-        if self.closing or self.geo_task or not self.profile:
+    def schedule_location_check(self, profile=None):
+        profile = profile or self.display_profile()
+        if self.closing or not profile:
             return
+        self.pending_geo_profiles[profile.id] = deepcopy(profile)
+        if self.geo_task and self.geo_task.profile.id == profile.id:
+            self.geo_task.cancelled.set()
+        QTimer.singleShot(0, self.run_pending_locations)
+
+    def refresh_location_views(self):
+        self.geo_render_timer.stop()
+        if not self.closing:
+            self.render_nodes()
+            self.update_route_pill()
+
+    def run_pending_locations(self):
+        if self.closing or self.geo_task:
+            return
+        while self.pending_geo_profiles:
+            profile_id = next(iter(self.pending_geo_profiles))
+            profile = self.pending_geo_profiles.pop(profile_id)
+            if not any(item.id == profile_id for item in self.library.profiles):
+                continue
+            self.check_locations(
+                all_nodes=True, automatic=True, profile_override=profile, refresh=True
+            )
+            if self.geo_task:
+                break
+
+    def check_locations(
+        self, all_nodes=False, automatic=False, profile_override=None, refresh=False
+    ):
+        profile = profile_override or self.display_profile()
+        if self.closing or self.geo_task or not profile:
+            return
+        choices = (
+            self.current_choices()
+            if self.profile and profile.id == self.profile.id
+            else profile.selections
+        )
         names = (
-            [item["name"] for item in self.display_profile().config.get("proxies", [])]
+            [item["name"] for item in profile.config.get("proxies", [])]
             if all_nodes
             else [self.current_node()]
         )
-        if automatic:
+        if automatic and not all_nodes:
             names = list(
                 dict.fromkeys(
                     name for group in self.groups_data for name in group.get("active", [])
                 )
             )[:4]
-        names = [
-            name
-            for name in names
-            if name and endpoint_rows(self.display_profile(), name, self.current_choices())
-        ]
-        if automatic:
+        names = [name for name in names if name and endpoint_rows(profile, name, choices)]
+        if automatic and not refresh:
             names = [
                 name
                 for name in names
-                if time.time() - self.geo_for_profile().get(name, {}).get("timestamp", 0) > 300
+                if time.time() - self.geo_results.get((profile.id, name), {}).get("timestamp", 0)
+                > 300
+                or self.geo_results.get((profile.id, name), {}).get("endpoints")
+                != endpoint_rows(profile, name, choices)
             ]
         if not names:
             if not automatic:
@@ -613,12 +665,12 @@ class WorkbenchMixin:
                     "Адрес маршрута не передан. Укажите его в редакторе маршрута."
                 )
             return
-        profile, choices = self.display_profile(), self.current_choices()
-        self.geo_client.proxy = (
+        proxy = (
             f"http://127.0.0.1:{self.core.mixed_port}"
             if self.connected and self.core.mixed_port
-            else None
+            else getattr(self, "subscription_proxy", None)
         )
+        self.geo_client.proxy = proxy
         dns = None
         if self.connected:
             port, secret = self.core.port, self.core.secret
@@ -642,12 +694,15 @@ class WorkbenchMixin:
         self.geo_task = task
         self.geo_cancel_button.setEnabled(True)
         self.geo_cancel_button.setVisible(True)
-        self.geo_button.setEnabled(False)
-        self.geo_all_button.setEnabled(False)
         self.server_result.setText("Проверка IP в фоне…")
 
         def checked(name, value):
             if self.closing:
+                return
+            latest = next((item for item in self.library.profiles if item.id == profile.id), None)
+            if latest is None or endpoint_rows(latest, name, choices) != endpoint_rows(
+                profile, name, choices
+            ):
                 return
             value["endpoints"] = endpoint_rows(profile, name, choices)
             self.geo_results[(profile.id, name)] = value
@@ -660,9 +715,8 @@ class WorkbenchMixin:
                     "Геолокация",
                 )
             if self.profile and self.profile.id == profile.id:
-                self.render_addresses()
-                self.update_route_pill()
-                self.render_nodes()
+                if not self.geo_render_timer.isActive():
+                    self.geo_render_timer.start(80)
 
         task.progress.connect(checked)
         task.message.connect(lambda message: self.log(message, "warning", "Геолокация"))
@@ -671,15 +725,16 @@ class WorkbenchMixin:
             if self.geo_task is task:
                 self.geo_task = None
             task.deleteLater()
+            self.refresh_location_views()
             self.geo_cancel_button.setEnabled(False)
             self.geo_cancel_button.setVisible(False)
-            self.geo_button.setEnabled(True)
-            self.geo_all_button.setEnabled(True)
             self.server_result.setText(
                 "Проверка IP завершена" if not task.cancelled.is_set() else "Проверка остановлена"
             )
             if self.closing:
                 QTimer.singleShot(0, self.close)
+            elif self.pending_geo_profiles:
+                QTimer.singleShot(0, self.run_pending_locations)
 
         task.finished.connect(finished)
         task.start()
@@ -714,7 +769,7 @@ class WorkbenchMixin:
             self.render_nodes()
             available = sum(value["value"] > 0 for value in values.values())
             self.delay_status.setText(
-                f"{datetime.now():%H:%M:%S} · Доступно {available}/{len(values)} · Авто: 60 с"
+                f"{datetime.now():%H:%M:%S} · Доступно {available}/{len(values)} · Авто: 15 с"
             )
 
         def failed(message):
@@ -795,6 +850,7 @@ class WorkbenchMixin:
             * 1000
         )
         self.flow_monitor.retention_seconds = settings.flow_history_minutes * 60
+        self.flow_timer.setInterval(settings.flow_poll_seconds * 1000)
         self.journal.configure(settings.log_limit, settings.save_logs)
         self.core.trace.configure(settings.log_limit, settings.save_logs)
         self.core.connection_log.configure(

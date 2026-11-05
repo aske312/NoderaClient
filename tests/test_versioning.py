@@ -63,3 +63,12 @@ def test_frozen_build_keeps_release_version_and_separate_identity(tmp_path, monk
     monkeypatch.setattr(versioning, "__file__", str(tmp_path / "versioning.py"))
     monkeypatch.setattr(versioning.sys, "frozen", True, raising=False)
     assert versioning.build_info() == info
+
+
+def test_test_channel_is_read_from_packaged_metadata(tmp_path, monkeypatch):
+    info = {"version": __version__, "build": "test-build", "channel": "test"}
+    (tmp_path / "resources").mkdir()
+    (tmp_path / "resources/build-info.json").write_text(json.dumps(info))
+    monkeypatch.setattr(versioning, "__file__", str(tmp_path / "versioning.py"))
+    monkeypatch.setattr(versioning.sys, "frozen", True, raising=False)
+    assert versioning.build_info()["channel"] == "test"

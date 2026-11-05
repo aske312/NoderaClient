@@ -1,9 +1,11 @@
 """Generate a build ID and Windows file metadata without changing the release version."""
 
+import argparse
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from launch_test import source_fingerprint
 from PyInstaller.utils.win32.versioninfo import (
     FixedFileInfo,
     StringFileInfo,
@@ -21,6 +23,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--channel", choices=("release", "test"), default="release")
+    arguments = parser.parse_args()
     now = datetime.now(timezone.utc)
     revision = git_revision(ROOT)
     info = {
@@ -29,7 +34,10 @@ def main():
         "artifact_id": now.strftime("%Y%m%d-%H%M%S-%f"),
         "created_at": now.isoformat(),
         "revision": revision,
+        "channel": arguments.channel,
     }
+    if arguments.channel == "test":
+        info["source_fingerprint"] = source_fingerprint(ROOT)
     (ROOT / "nodera/resources/build-info.json").write_text(json.dumps(info), encoding="utf-8")
     numbers = (*map(int, __version__.split(".")), 0)
     version = VSVersionInfo(

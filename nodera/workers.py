@@ -21,7 +21,7 @@ class GeoTask(QThread):
 
     def run(self):
         peers = transport_peers(self.core_pid)
-        for name in self.names[:64]:
+        for name in self.names:
             if self.cancelled.is_set():
                 break
             try:

@@ -24,7 +24,8 @@ def test_window_initial_state_navigation_and_profile(tmp_path):
     assert not hasattr(window, "core_path")
     for index in range(9):
         window.navigate(index)
-        assert window.stack.currentIndex() == (2 if index in (3, 5) else index)
+        expected = 0 if index in (1, 4, 6, 8) else 2 if index in (3, 5) else index
+        assert window.stack.currentIndex() == expected
     wait_task(window, app)
     window.profile = Profile(
         "Test PRO",
@@ -257,7 +258,8 @@ def test_auto_update_while_connected_preserves_profile_on_failure_and_retries(
 def test_bottom_navigation_reaches_every_page_and_closes_palette(tmp_path, monkeypatch):
     monkeypatch.setattr("nodera.autostart.is_enabled", lambda: False)
     app = QApplication.instance() or QApplication([])
-    window = MainWindow(Store(tmp_path), Settings(update_hours=0, geo_auto=False), None)
+    profile = Profile("Test", "", {"proxies": []}, "")
+    window = MainWindow(Store(tmp_path), Settings(update_hours=0, geo_auto=False), profile)
     window.timer.stop()
     window.show()
     app.processEvents()

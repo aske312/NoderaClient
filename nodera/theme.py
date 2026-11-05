@@ -23,10 +23,12 @@ QLabel#navigationTitle { font-size: 12px; font-weight: 500; color: #d6e8ec; }
 QPushButton#networkTag { padding: 3px 8px; border-radius: 8px; background: #17303a; color: #a4bac4; font-size: 11px; }
 QPushButton#networkTag[state="ok"] { background: #153b32; border-color: #376754; color: #8fdbc1; }
 QPushButton#networkTag[state="error"] { background: #3b2b26; border-color: #735044; color: #e6b49d; }
-QPushButton#connectionStatus { background: transparent; border: none; color: #8faab5; font-size: 13px; font-weight: 500; padding: 3px 6px; }
-QPushButton#connectionStatus[state="ok"] { color: #8fdbc1; }
-QPushButton#connectionStatus[state="error"] { color: #e6b49d; }
-QPushButton#connectionStatus:hover:enabled { color: #c8f3ed; }
+QPushButton#connectionStatus { background: #142d37; border: 1px solid #2b4855; border-radius: 12px; color: #95b2bd; font-size: 11px; font-weight: 600; padding: 4px 12px; min-height: 16px; }
+QPushButton#connectionStatus:disabled { background: #142d37; border-color: #2b4855; color: #95b2bd; }
+QPushButton#connectionStatus[state="ok"] { background: #153b32; border-color: #376754; color: #9ce2c8; }
+QPushButton#connectionStatus[state="error"] { background: #3b2b26; border-color: #735044; color: #edbba4; }
+QPushButton#connectionStatus[state="checking"] { background: #17343f; border-color: #376471; color: #a9d6df; }
+QPushButton#connectionStatus:hover:enabled { border-color: #63a5a1; }
 QFrame#serverChecks { background: #10232d; border: 1px solid #203b47; border-radius: 9px; }
 QFrame#routeHop { background: #10252e; border: 1px solid #26424e; border-radius: 10px; }
 QLabel#hopNumber { background: #1c3c40; color: #9cdbcc; border-radius: 12px; font-size: 11px; font-weight: 600; }
@@ -54,6 +56,19 @@ QToolButton#aboutDetails:hover { color: #c8f3ed; }
 QProgressBar#aboutProgress { background: #16333d; border: none; border-radius: 1px; }
 QProgressBar#aboutProgress::chunk { background: #69c8b8; border-radius: 1px; }
 QFrame#settingsCard { background: #0d222c; border: 1px solid #1d3a47; border-radius: 10px; }
+QWidget#settingsPage QComboBox { padding: 4px 28px 4px 8px; min-height: 16px; font-size: 11px; }
+QWidget#settingsPage QSpinBox, QWidget#settingsPage QDoubleSpinBox { padding: 4px 22px 4px 8px; font-size: 11px; }
+QWidget#settingsPage QLineEdit { padding: 4px 8px; font-size: 11px; }
+QWidget#settingsPage QPushButton { padding: 4px 10px; font-size: 11px; }
+QWidget#settingRow:hover { background: #102832; border-radius: 6px; }
+QTabWidget#compactSettings QTabBar::tab { padding: 6px 10px; margin-right: 3px; margin-bottom: 3px; }
+QFrame#subscriptionDetail { background: #0d222c; border: 1px solid #203b47; border-radius: 12px; }
+QLabel#subscriptionName { font-size: 15px; font-weight: 600; color: #e2f0f2; }
+QLabel#summaryValue { font-size: 14px; font-weight: 600; color: #c8e7e5; }
+QLabel#proBadge { background: #173e37; color: #8cddbd; border: 1px solid #306a56; border-radius: 6px; padding: 2px 6px; font-size: 10px; font-weight: 700; }
+QFrame#applicationUpdates { background: #0d222c; border: 1px solid #1d3a47; border-radius: 10px; }
+QPushButton#dangerAction { background: transparent; border-color: #493839; color: #c7908d; }
+QPushButton#dangerAction:hover { background: #38272b; border-color: #80504f; }
 QFrame#quotaRail { background: #0c1e28; border: none; border-radius: 14px; }
 QLabel#quotaValue { font-size: 13px; font-weight: 600; color: #d8edf0; }
 QLabel#railDetail { font-size: 10px; color: #5d808e; }

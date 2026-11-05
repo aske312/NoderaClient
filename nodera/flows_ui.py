@@ -244,6 +244,28 @@ def set_block(item, payload, identity):
 
 
 class FlowsMixin:
+    def capture_flows(self):
+        if (
+            not self.connected
+            or self.closing
+            or self.task
+            or not self.core.running
+            or "flows" in self.inspections
+        ):
+            return
+
+        def captured(connections):
+            self.flow_monitor.update(connections)
+            self.render_flows()
+
+        def failed(message):
+            if self.stack.currentIndex() == 8:
+                self.flow_summary.setText(
+                    "Список временно недоступен. Показаны последние соединения."
+                )
+
+        self.start_inspection("flows", self.core.connection_snapshot, captured, failed)
+
     def build_flows(self):
         layout = self.page("Соединения")
         toolbar = QHBoxLayout()
@@ -352,8 +374,15 @@ class FlowsMixin:
 
     def render_flows(self, force=False):
         if hasattr(self, "flow_note"):
+            scope = (
+                "TUN · Приложения с сетевой активностью. "
+                if self.connected and self.session_tun
+                else "Прокси · Только приложения, использующие Nodera. "
+                if self.connected
+                else "Для захвата трафика всех приложений выберите TUN в настройках. "
+            )
             self.flow_note.setText(
-                f"Домены/IP из ядра, без названий вкладок. Завершённые — {self.settings.flow_history_minutes} мин в памяти."
+                scope + f"Завершённые — {self.settings.flow_history_minutes} мин в памяти."
             )
         if not hasattr(self, "flow_views") or (self.flow_pause.isChecked() and not force):
             return

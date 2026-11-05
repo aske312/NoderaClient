@@ -4,7 +4,20 @@ import os
 import pytest
 
 from nodera.models import ClientError, Profile
-from nodera.storage import Store
+from nodera.storage import Store, data_directory
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows data directories")
+def test_development_data_is_separate_from_installed_client(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    production = data_directory()
+    development = data_directory(development=True)
+    testing = data_directory(testing=True)
+    assert production == tmp_path / "NoderaClient"
+    assert development != production
+    assert development.parts[-2:] == ("artifacts", "dev-data")
+    assert testing == tmp_path / "NoderaClient-Test"
+    assert testing not in (production, development)
 
 
 def test_device_identity_survives_restart(tmp_path):
