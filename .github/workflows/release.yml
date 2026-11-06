@@ -61,10 +61,6 @@ jobs:
       - run: .\scripts\build.ps1 -Installer
       - uses: actions/upload-artifact@v4
         with:
-          name: Nodera-installer-preview
-          path: dist/preview/Nodera-Setup-Preview.exe
-      - uses: actions/upload-artifact@v4
-        with:
           name: Nodera-installer
           path: |
             dist/installers/Nodera-Setup.exe

@@ -49,7 +49,6 @@ def main():
         ROOT / "nodera/resources/build-info.json",
     ):
         shutil.copy2(source, destination / source.name)
-    (destination / "preview.json").write_text('{"preview": true}', encoding="utf-8")
     version = (ROOT / "build/version-info.txt").read_text(encoding="utf-8")
     (destination / "version-info.txt").write_text(
         version.replace("Nodera.exe", "Nodera-Setup.exe"), encoding="utf-8"

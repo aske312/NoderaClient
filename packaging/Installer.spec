@@ -21,9 +21,3 @@ setup = EXE(
     name="Nodera-Setup", console=False, uac_admin=True, upx=False,
     icon=str(resources / "nodera.ico"), version=str(bundle / "version-info.txt"),
 )
-preview = EXE(
-    pyz, a.scripts, a.binaries, a.datas,
-    [("installer/preview.json", str(bundle / "preview.json"), "DATA")],
-    name="Nodera-Setup-Preview", console=False, uac_admin=True, upx=False,
-    icon=str(resources / "nodera.ico"), version=str(bundle / "version-info.txt"),
-)
