@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from nodera.dialogs import SubscriptionDialog
-from nodera.models import ClientError, ProfileLibrary
+from nodera.models import ClientError, ProfileLibrary, visible_proxies
 from nodera.profile_view import format_bytes, is_pro_subscription
 from nodera.subscription import fetch_profile
 from nodera.widgets import AddProfileButton, label
@@ -181,7 +181,7 @@ class ProfilesMixin:
                 for profile in self.library.profiles:
                     selector.addItem("", profile.id)
         for index, profile in enumerate(self.library.profiles):
-            count = len(profile.config.get("proxies", []))
+            count = len(visible_proxies(profile.config))
             noun = (
                 "подключение"
                 if count % 10 == 1 and count % 100 != 11
@@ -219,7 +219,7 @@ class ProfilesMixin:
         )
         if self.profile:
             usage = self.profile.usage
-            self.profile_summary_nodes.setText(str(len(self.profile.config.get("proxies", []))))
+            self.profile_summary_nodes.setText(str(len(visible_proxies(self.profile.config))))
             total = usage.get("total")
             self.profile_summary_remaining.setText(
                 format_bytes(max(0, total - usage.get("upload", 0) - usage.get("download", 0)))
@@ -348,7 +348,7 @@ class ProfilesMixin:
                     forced_server=previous.forced_server
                     if any(
                         node.get("name") == previous.forced_server
-                        for node in profile.config.get("proxies", [])
+                        for node in visible_proxies(profile.config)
                     )
                     else "",
                     locations=dict(previous.locations),

@@ -3,6 +3,7 @@
 import ipaddress
 
 from nodera.geolocation import endpoint_rows
+from nodera.models import visible_proxies
 from nodera.routes import route_for_node
 
 
@@ -15,7 +16,7 @@ def route_inventory(profile, results, choices=None, cache=None):
     for result in results.values():
         for observation in result.get("rows", []):
             by_host.setdefault(observation.get("host"), []).append(observation)
-    for node in profile.config.get("proxies", []):
+    for node in visible_proxies(profile.config):
         name = node["name"]
         hops = route_for_node(profile, name, choices)
         endpoints = endpoint_rows(profile, name, choices)

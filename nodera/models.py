@@ -7,6 +7,21 @@ class ClientError(Exception):
     """An error safe to display without exposing credentials."""
 
 
+def visible_proxies(config):
+    """Transport dependencies stay in Mihomo but are never selectable/tested alone."""
+    nodes = config.get("proxies", [])
+    dependencies = {node.get("dialer-proxy") for node in nodes if isinstance(node, dict)}
+    return [
+        node
+        for node in nodes
+        if isinstance(node, dict)
+        and not (
+            str(node.get("name", "")).startswith("__312_transport_")
+            and node.get("name") in dependencies
+        )
+    ]
+
+
 @dataclass
 class Profile:
     name: str

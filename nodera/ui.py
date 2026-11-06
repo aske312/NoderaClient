@@ -43,7 +43,7 @@ from nodera.flows_ui import FlowsMixin
 from nodera.geolocation import GeoClient
 from nodera.journal import Journal
 from nodera.locations import country
-from nodera.models import ClientError
+from nodera.models import ClientError, visible_proxies
 from nodera.navigation import NavigationDock
 from nodera.presentation import PresentationMixin
 from nodera.profile_view import effective_tun, policy_view
@@ -429,7 +429,9 @@ class MainWindow(
     def offline_groups(self):
         groups = []
         if self.profile:
-            nodes = {node["name"]: node.get("type", "—") for node in self.profile.config["proxies"]}
+            nodes = {
+                node["name"]: node.get("type", "—") for node in visible_proxies(self.profile.config)
+            }
             types = {
                 "select": "Selector",
                 "fallback": "Fallback",
@@ -497,7 +499,7 @@ class MainWindow(
         profile = self.display_profile()
         geo_results = self.geo_for_profile()
         definitions = (
-            {node["name"]: node for node in profile.config.get("proxies", [])} if profile else {}
+            {node["name"]: node for node in visible_proxies(profile.config)} if profile else {}
         )
         choices = self.current_choices()
         blocker = QSignalBlocker(self.node_list)
@@ -664,7 +666,7 @@ class MainWindow(
                 and self.current_node()
                 and any(
                     node["name"] == self.current_node()
-                    for node in self.profile.config.get("proxies", [])
+                    for node in visible_proxies(self.profile.config)
                 )
             )
         )
@@ -742,7 +744,7 @@ class MainWindow(
         if self.profile.forced_server == member:
             self.restore_server_policy()
         elif member not in self.core.frozen_routes and any(
-            node.get("name") == member for node in self.profile.config.get("proxies", [])
+            node.get("name") == member for node in visible_proxies(self.profile.config)
         ):
             self.force_server(member)
 

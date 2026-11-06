@@ -26,7 +26,7 @@ from nodera.connection_trace import ConnectionTrace
 from nodera.controller import Controller
 from nodera.geodata import prepare_session_geodata
 from nodera.journal import Journal, profile_secrets, redact
-from nodera.models import ClientError, Profile, Settings
+from nodera.models import ClientError, Profile, Settings, visible_proxies
 from nodera.ports import choose_ports, listener_owners
 from nodera.profile_view import effective_tun
 from nodera.provider_cache import RuleCache
@@ -403,7 +403,7 @@ class Core:
                 and isinstance(group.get("name"), str)
                 and not group.get("hidden", False)
             ]
-            self.node_names = [node["name"] for node in config.get("proxies", [])]
+            self.node_names = [node["name"] for node in visible_proxies(config)]
             self._policy_mode = config["mode"]
             self._base_config = copy.deepcopy(config)
             self.route_health = RouteHealth()
@@ -852,7 +852,7 @@ class Core:
                 names = [g["name"] for g in config.get("proxy-groups", []) if not g.get("hidden")]
                 if (profile.forced_server or config["mode"] == "global") and "GLOBAL" not in names:
                     names.insert(0, "GLOBAL")
-                nodes = [node["name"] for node in config.get("proxies", [])]
+                nodes = [node["name"] for node in visible_proxies(config)]
                 groups = controller.groups(names, nodes)
                 atomic_write(
                     self.runtime / "config.yaml",

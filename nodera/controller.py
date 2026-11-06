@@ -71,7 +71,9 @@ class Controller:
                 continue
             members = []
             for member in group["all"]:
-                if isinstance(member, str) and member.startswith(PROBE_PREFIX):
+                if isinstance(member, str) and member.startswith(
+                    (PROBE_PREFIX, "__312_transport_")
+                ):
                     continue
                 if not isinstance(member, str):
                     continue

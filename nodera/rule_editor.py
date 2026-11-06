@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from nodera.controls import ComboBox as QComboBox
-from nodera.models import ClientError
+from nodera.models import ClientError, visible_proxies
 
 
 def make_rule(kind, condition, target):
@@ -58,7 +58,7 @@ class RuleDialog(QDialog):
             "DIRECT",
             "REJECT",
             *[item["name"] for item in profile.config.get("proxy-groups", [])],
-            *[item["name"] for item in profile.config.get("proxies", [])],
+            *[item["name"] for item in visible_proxies(profile.config)],
         ]
         self.target.addItems(list(dict.fromkeys(value for value in targets if "," not in value)))
         form.addRow("Тип", self.kind)

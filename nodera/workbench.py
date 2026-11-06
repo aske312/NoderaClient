@@ -45,7 +45,7 @@ from nodera.diagnostics import preflight
 from nodera.geolocation import endpoint_rows
 from nodera.journal import compact_entries, format_entry, profile_secrets, useful_event
 from nodera.locations import country
-from nodera.models import ClientError
+from nodera.models import ClientError, visible_proxies
 from nodera.route_inventory import route_inventory
 from nodera.rule_editor import RuleDialog
 from nodera.server_assets import flag_pixmap
@@ -639,7 +639,7 @@ class WorkbenchMixin:
             else profile.selections
         )
         names = (
-            [item["name"] for item in profile.config.get("proxies", [])]
+            [item["name"] for item in visible_proxies(profile.config)]
             if all_nodes
             else [self.current_node()]
         )
@@ -752,7 +752,7 @@ class WorkbenchMixin:
             or "delays" in self.inspections
         ):
             return
-        names = [item["name"] for item in self.display_profile().config.get("proxies", [])]
+        names = [item["name"] for item in visible_proxies(self.display_profile().config)]
         if not names:
             return
         port, secret = self.core.port, self.core.secret

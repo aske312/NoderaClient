@@ -2,7 +2,7 @@
 
 from nodera.bundled_core import core_manifest, resolve_core
 from nodera.core import is_admin
-from nodera.models import ClientError, Profile, Settings
+from nodera.models import ClientError, Profile, Settings, visible_proxies
 from nodera.ports import choose_ports
 from nodera.profile_view import effective_tun
 
@@ -19,7 +19,7 @@ def preflight(settings: Settings, profile: Profile | None, running: bool = False
     except ClientError as exc:
         add("Ядро Mihomo", "error", str(exc))
     if profile and profile.config.get("proxies"):
-        add("Подписка", "ok", f"Доступно подключений: {len(profile.config['proxies'])}.")
+        add("Подписка", "ok", f"Доступно подключений: {len(visible_proxies(profile.config))}.")
     else:
         add("Подписка", "error", "Добавьте HTTPS-ссылку подписки в разделе «Подписки».")
     if not effective_tun(profile.config if profile else {}, settings):
