@@ -51,9 +51,6 @@ try {
         $installerOutput = Join-Path $projectRoot 'dist\installers'
         & $pythonPath -m PyInstaller --noconfirm @cleanArguments --distpath $installerOutput --workpath build/installer-bootstrap packaging/Installer.spec
         if ($LASTEXITCODE -ne 0) { throw 'Installer bootstrap build failed' }
-        $previewOutput = Join-Path $projectRoot 'dist\preview'
-        New-Item -ItemType Directory -Force -Path $previewOutput | Out-Null
-        Move-Item -LiteralPath (Join-Path $installerOutput 'Nodera-Setup-Preview.exe') -Destination (Join-Path $previewOutput 'Nodera-Setup-Preview.exe') -Force
         $installerPath = Join-Path $installerOutput 'Nodera-Setup.exe'
         $installerHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
         [IO.File]::WriteAllText($installerPath + '.sha256', $installerHash + '  ' + (Split-Path -Leaf $installerPath) + [Environment]::NewLine)

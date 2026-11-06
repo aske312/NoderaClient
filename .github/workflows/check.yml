@@ -34,14 +34,3 @@ jobs:
         timeout-minutes: 10
         env:
           QT_QPA_PLATFORM: offscreen
-      - name: Build desktop client
-        run: |
-          if ($env:FULL_CHECKS -eq 'true') {
-            .\scripts\build.ps1
-          } else {
-            .\scripts\build.ps1 -TestBuild
-          }
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Nodera-test-${{ github.sha }}
-          path: dist/builds/*/Nodera/
