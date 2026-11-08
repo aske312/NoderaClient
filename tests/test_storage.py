@@ -25,6 +25,22 @@ def test_device_identity_survives_restart(tmp_path):
     assert store.load_settings().device_id == Store(tmp_path).load_settings().device_id
 
 
+def test_auto_connect_is_opt_in_and_persists(tmp_path):
+    store = Store(tmp_path)
+    settings = store.load_settings()
+    assert not settings.auto_connect
+    settings.auto_connect = True
+    store.save_settings(settings)
+    assert Store(tmp_path).load_settings().auto_connect
+
+
+@pytest.mark.parametrize("value", ["true", 1, None])
+def test_invalid_auto_connect_is_rejected(tmp_path, value):
+    (tmp_path / "settings.json").write_text(json.dumps({"auto_connect": value}))
+    with pytest.raises(ClientError):
+        Store(tmp_path).load_settings()
+
+
 def test_close_to_tray_is_enabled_for_new_and_migrated_settings(tmp_path):
     assert Store(tmp_path / "new").load_settings().close_to_tray
     path = tmp_path / "settings.json"

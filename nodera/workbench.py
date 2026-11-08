@@ -826,6 +826,7 @@ class WorkbenchMixin:
             tun_mtu=self.mtu_setting.value() if self.mtu_setting.value() >= 1280 else 0,
             ipv6_mode=self.ipv6_setting.currentData(),
             close_to_tray=self.close_tray_check.isChecked(),
+            auto_connect=self.auto_connect_check.isChecked(),
             flow_poll_seconds=self.flow_poll_setting.currentData(),
             flow_history_minutes=self.flow_history_setting.currentData(),
             save_connection_logs=self.connection_log_check.isChecked(),

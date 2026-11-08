@@ -20,6 +20,8 @@ def test_switches_and_advanced_settings_are_saved_and_applied(tmp_path):
     window.navigate(2)
     app.processEvents()
     assert isinstance(window.close_tray_check, Switch)
+    assert not window.auto_connect_check.isChecked()
+    window.auto_connect_check.setChecked(True)
     assert window.close_tray_check.isChecked()
     QTest.mouseClick(window.close_tray_check, Qt.MouseButton.LeftButton, pos=QPoint(35, 12))
     assert not window.close_tray_check.isChecked()
@@ -35,6 +37,7 @@ def test_switches_and_advanced_settings_are_saved_and_applied(tmp_path):
     assert settings.flow_poll_seconds == 2 and settings.flow_history_minutes == 15
     assert settings.client_point["code"] == "DE"
     assert settings.close_to_tray
+    assert settings.auto_connect
     assert window.flow_monitor.retention_seconds == 900
     assert not window.core.trace.persist and window.core.connection_log.journal.persist
     assert window.core.connection_log.journal.max_bytes == 16 * 1024 * 1024

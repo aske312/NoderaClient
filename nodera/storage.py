@@ -137,6 +137,7 @@ class Store:
                 or type(settings.save_logs) is not bool
                 or type(settings.geo_auto) is not bool
                 or type(settings.close_to_tray) is not bool
+                or type(settings.auto_connect) is not bool
                 or type(settings.tray_behavior_version) is not int
                 or settings.tray_behavior_version != 1
                 or settings.flow_poll_seconds not in (1, 2, 3, 5, 10)

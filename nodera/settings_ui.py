@@ -121,6 +121,8 @@ def build_settings(self):
         self.autostart_check,
         "В трее при входе в систему · Применяется сразу",
     )
+    self.auto_connect_check = switch(self.settings.auto_connect)
+    setting(form, "Подключаться при запуске", self.auto_connect_check)
     self.update_interval = selector(
         [
             ("Вручную", 0),

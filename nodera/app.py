@@ -152,7 +152,7 @@ def main() -> int:
             window.show()
         if warning:
             window.error(warning)
-        elif "--connect" in sys.argv or resume:
+        elif library.active and (settings.auto_connect or "--connect" in sys.argv or resume):
             QTimer.singleShot(0, window.toggle)
         result = app.exec()
         window.core.stop("application exit")

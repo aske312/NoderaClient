@@ -74,6 +74,7 @@ class Settings:
     tun_mtu: int = 0
     ipv6_mode: str = "profile"
     close_to_tray: bool = True
+    auto_connect: bool = False
     tray_behavior_version: int = 1
     flow_poll_seconds: int = 1
     flow_history_minutes: int = 5
