@@ -1,10 +1,11 @@
 """Bundled protocol artwork and country flags shared with the server UI."""
 
+import math
 import re
 from functools import lru_cache
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QPainter, QPixmap
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QPolygonF, QRadialGradient
 from PySide6.QtSvg import QSvgRenderer
 
 from nodera.locations import RESOURCE, country_hints
@@ -23,11 +24,69 @@ PROTOCOL_ASSETS = {
     "amneziawg": "AWG",
 }
 
+HIGH_LATENCY_MS = 500
+
+
+def route_visual_state(data):
+    if data.get("frozen"):
+        return "frozen"
+    delay = data.get("delay")
+    if data.get("error") or type(delay) in (int, float) and delay <= 0:
+        return "error"
+    if type(delay) in (int, float) and delay >= HIGH_LATENCY_MS:
+        return "slow"
+    return "normal"
+
 
 @lru_cache(maxsize=32)
 def protocol_pixmap(protocol):
     asset = PROTOCOL_ASSETS.get(str(protocol).lower(), "Mi")
     return QPixmap(str(RESOURCE / "protocols" / f"{asset}.webp"))
+
+
+@lru_cache(maxsize=128)
+def protocol_status_pixmap(protocol, state):
+    """Keep the protocol artwork visible under a static health effect."""
+    canvas = QPixmap(80, 80)
+    canvas.setDevicePixelRatio(2)
+    canvas.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(canvas)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    color = {"frozen": "#8edbfa", "error": "#f1767c", "slow": "#e8b65d"}.get(state)
+    if color:
+        glow = QRadialGradient(QPointF(20, 20), 20)
+        glow.setColorAt(0, QColor(color))
+        tint = QColor(color)
+        tint.setAlpha(90)
+        glow.setColorAt(0.55, tint)
+        glow.setColorAt(1, QColor(0, 0, 0, 0))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(glow)
+        painter.drawEllipse(QRectF(0, 0, 40, 40))
+    artwork = protocol_pixmap(protocol)
+    painter.drawPixmap(QRectF(6, 6, 28, 28), artwork, QRectF(artwork.rect()))
+    if color:
+        painter.setPen(QPen(QColor(color), 1))
+        painter.setBrush(QColor(142, 219, 250, 45) if state == "frozen" else Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRectF(4.5, 4.5, 31, 31), 8, 8)
+        painter.setBrush(QColor("#10232d"))
+        painter.drawEllipse(QPointF(31, 31), 6, 6)
+        painter.setPen(QPen(QColor(color), 1.25, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        if state == "frozen":
+            for angle in (0, math.pi / 3, 2 * math.pi / 3):
+                direction = QPointF(math.cos(angle), math.sin(angle))
+                painter.drawLine(QPointF(31, 31) - direction * 4, QPointF(31, 31) + direction * 4)
+            # Crystalline highlights across the corners of the frozen artwork.
+            painter.drawPolyline(QPolygonF([QPointF(8, 14), QPointF(12, 8), QPointF(18, 11)]))
+            painter.drawLine(QPointF(12, 8), QPointF(14, 16))
+        elif state == "error":
+            painter.drawLine(QPointF(28.5, 28.5), QPointF(33.5, 33.5))
+            painter.drawLine(QPointF(33.5, 28.5), QPointF(28.5, 33.5))
+        elif state == "slow":
+            painter.drawLine(QPointF(31, 27.5), QPointF(31, 31))
+            painter.drawLine(QPointF(31, 31), QPointF(33.5, 32.5))
+    painter.end()
+    return canvas
 
 
 @lru_cache(maxsize=300)

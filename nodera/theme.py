@@ -3,6 +3,15 @@
 STYLE = """
 QWidget { background: transparent; color: #e4eff2; font-family: 'Segoe UI'; font-size: 12px; }
 QMainWindow, QDialog, QMessageBox { background: #091720; }
+QDialog#proOptions { background: transparent; }
+QPushButton#proOptionCard { background: #0d222c; border: 1px solid #1d3a47; border-radius: 10px; text-align: left; }
+QPushButton#proOptionCard:hover, QPushButton#proOptionCard:focus { background: #15313b; border-color: #417980; }
+QPushButton#protocolPicker { text-align: left; font-weight: 400; }
+QPushButton#protocolPicker::menu-indicator { image: none; }
+QListWidget#protocolChoices { background: transparent; border: none; padding: 0; }
+QListWidget#protocolChoices::item { padding: 3px 4px; border: none; border-radius: 5px; }
+QListWidget#protocolChoices::indicator { width: 15px; height: 15px; border: 1px solid #33515e; border-radius: 4px; background: #0a1d27; }
+QListWidget#protocolChoices::indicator:checked { background: #69c8aa; border-color: #80dfc0; }
 QLabel { background: transparent; }
 QLabel:disabled { color: #496572; }
 QWidget#titleBar { background: transparent; border: none; }

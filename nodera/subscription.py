@@ -180,6 +180,10 @@ def fetch_profile(
                         "Подписка перенаправляет запрос. Используйте конечный HTTPS-адрес."
                     )
                 response.raise_for_status()
+                if response.headers.get("x-nodera-selection-state") == "pending":
+                    raise ClientError(
+                        "На сервере подготовлен профиль, ожидающий решения. Откройте «Опции» подписки. Текущая подписка сохранена."
+                    )
                 phase = "body"
                 content = bytearray()
                 for chunk in response.iter_bytes():

@@ -255,8 +255,11 @@ class FlowsMixin:
             return
 
         def captured(connections):
+            previous_routes = self.flow_monitor.active_routes.copy()
             self.flow_monitor.update(connections)
             self.render_flows()
+            if previous_routes != self.flow_monitor.active_routes:
+                self.render_nodes()
 
         def failed(message):
             if self.stack.currentIndex() == 8:

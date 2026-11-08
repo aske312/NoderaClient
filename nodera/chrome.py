@@ -277,6 +277,7 @@ class FramelessWindowMixin:
         if not hasattr(self, "resize_handles"):
             return
         maximized = self.isMaximized()
+        resizable = self.minimumSize() != self.maximumSize()
         if QGuiApplication.platformName() != "offscreen":
             if maximized:
                 self.clearMask()
@@ -297,7 +298,7 @@ class FramelessWindowMixin:
         ]
         for handle, rectangle in zip(self.resize_handles, rectangles, strict=True):
             handle.setGeometry(*rectangle)
-            handle.setVisible(not maximized)
+            handle.setVisible(not maximized and resizable)
             handle.raise_()
 
     def resizeEvent(self, event):

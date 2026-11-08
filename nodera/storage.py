@@ -5,10 +5,11 @@ import json
 import os
 import tempfile
 from ctypes import wintypes
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from nodera.models import ClientError, Profile, ProfileLibrary, Settings
+from nodera.profile_view import initial_subscription_settings
 
 
 def data_directory(*, development: bool = False, testing: bool = False) -> Path:
@@ -93,6 +94,8 @@ class Store:
         self.root = root
 
     def load_settings(self) -> Settings:
+        from nodera.channel_policy import valid_preferences
+
         path = self.root / "settings.json"
         if not path.exists():
             settings = Settings()
@@ -105,7 +108,7 @@ class Store:
             # Legacy executable overrides are intentionally ignored: the core is embedded.
             migrated_core = "core_path" in data
             data.pop("core_path", None)
-            # Connection mode belongs to this installation, never to a subscription.
+            # Migrate the removed continuous-follow mode; new imports seed settings once.
             migrated_mode = "follow_profile" in data
             if type(data.pop("follow_profile", False)) is not bool:
                 raise ValueError
@@ -148,6 +151,7 @@ class Store:
                 or type(settings.map_auto_zoom) is not bool
                 or not valid_client_point(settings.client_point)
                 or type(settings.client_location_attempted) is not bool
+                or not valid_preferences(settings.channel_preferences)
                 or settings.tun_stack not in ("profile", "mixed", "system", "gvisor")
                 or type(settings.tun_mtu) is not int
                 or not (settings.tun_mtu == 0 or 1280 <= settings.tun_mtu <= 9000)
@@ -174,6 +178,8 @@ class Store:
                 if not isinstance(data, dict) or data.get("schema") != 1:
                     raise ValueError
                 profiles = [Profile(**item) for item in data["profiles"]]
+                if any(type(profile.settings_initialized) is not bool for profile in profiles):
+                    raise ValueError
                 ids = [profile.id for profile in profiles]
                 if len(ids) != len(set(ids)) or any(
                     not isinstance(key, str) or not key for key in ids
@@ -209,6 +215,27 @@ class Store:
     def save_profile(self, profile: Profile) -> None:
         library = self.load_library()
         self.save_library(library.upsert(profile))
+
+    def save_library_activation(self, library: ProfileLibrary, settings: Settings):
+        """Commit first-use defaults with the activation marker, rolling back on failure."""
+        profile = library.active
+        if profile is None or profile.settings_initialized:
+            self.save_library(library)
+            return library, settings
+        initialized = library.upsert(replace(profile, settings_initialized=True))
+        seeded = initial_subscription_settings(profile.config, settings)
+        path = self.root / "settings.json"
+        previous = path.read_bytes() if path.exists() else None
+        self.save_settings(seeded)
+        try:
+            self.save_library(initialized)
+        except (OSError, ClientError):
+            if previous is None:
+                path.unlink(missing_ok=True)
+            else:
+                atomic_write(path, previous)
+            raise
+        return initialized, seeded
 
     def save_library(self, library: ProfileLibrary) -> None:
         data = {

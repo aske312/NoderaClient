@@ -89,6 +89,9 @@ class PresentationMixin:
         self.open_profile.setObjectName("dashboardIcon")
         self.open_profile.clicked.connect(lambda: self.navigate(1))
         header.addWidget(self.dashboard_update_button)
+        self.dashboard_options_button = QPushButton("Опции")
+        self.dashboard_options_button.clicked.connect(self.channel_options)
+        header.addWidget(self.dashboard_options_button)
         header.addWidget(self.open_profile)
         layout.addWidget(self.dashboard_header)
 

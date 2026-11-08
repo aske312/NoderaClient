@@ -35,6 +35,8 @@ class Profile:
     id: str = field(default_factory=lambda: str(uuid4()))
     local_rules: list[str] = field(default_factory=list)
     forced_server: str = ""
+    settings_initialized: bool = True
+    channel_capabilities: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -81,3 +83,4 @@ class Settings:
     map_auto_zoom: bool = True
     client_point: dict[str, Any] = field(default_factory=dict)
     client_location_attempted: bool = False
+    channel_preferences: dict[str, dict[str, Any]] = field(default_factory=dict)

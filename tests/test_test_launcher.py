@@ -69,6 +69,19 @@ def test_cache_cannot_launch_a_path_outside_build_directory(project):
     assert launch_test.current_build("same", project) is None
 
 
+def test_build_sets_execution_policy_only_for_its_powershell_process(project, monkeypatch):
+    from unittest.mock import Mock
+
+    process = Mock(returncode=0)
+    process.poll.return_value = 0
+    start = Mock(return_value=process)
+    monkeypatch.setattr(launch_test.subprocess, "Popen", start)
+    launch_test.build(project, progress=False)
+    command = start.call_args.args[0]
+    assert command[command.index("-ExecutionPolicy") + 1] == "Bypass"
+    assert command[command.index("-File") + 1] == str(project / "scripts/build-test.ps1")
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows launcher lock")
 def test_failed_rebuild_does_not_launch_a_stale_binary(project, monkeypatch):
     packaged_build(project, "old")

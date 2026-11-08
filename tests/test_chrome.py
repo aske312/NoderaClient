@@ -64,7 +64,11 @@ def test_macos_buttons_minimize_and_close_without_maximize(tmp_path):
     assert not window.windowFlags() & Qt.WindowType.WindowMaximizeButtonHint
     assert not hasattr(window.title_bar, "maximize")
     assert window.title_bar.close_button.x() > window.title_bar.minimize.x() > window.width() - 80
-    assert all(handle.isVisible() for handle in window.resize_handles)
+    assert window.size() == window.minimumSize() == window.maximumSize() == QSize(840, 620)
+    assert all(not handle.isVisible() for handle in window.resize_handles)
+    window.resize(1100, 800)
+    app.processEvents()
+    assert window.size() == QSize(840, 620)
     QTest.mouseDClick(window.title_bar, Qt.MouseButton.LeftButton, pos=QPoint(250, 20))
     app.processEvents()
     assert not window.isMaximized()

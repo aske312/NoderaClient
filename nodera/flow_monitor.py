@@ -49,11 +49,13 @@ def address(value):
 class FlowMonitor:
     def __init__(self, retention_seconds=300):
         self.flows = {}
+        self.active_routes = set()
         self.truncated = False
         self.retention_seconds = retention_seconds
 
     def clear(self):
         self.flows.clear()
+        self.active_routes.clear()
         self.truncated = False
 
     def update(self, connections, now=None):
@@ -62,6 +64,7 @@ class FlowMonitor:
         now = time.monotonic() if now is None else now
         self.truncated = len(connections) > MAX_FLOWS
         active = set()
+        routes = set()
         for connection in connections[:MAX_FLOWS]:
             if not isinstance(connection, dict) or not connection.get("id"):
                 continue
@@ -82,6 +85,8 @@ class FlowMonitor:
             host = domain(metadata.get("host"))
             ip = address(text(metadata.get("destinationIP")))
             chains = connection.get("chains") or []
+            if isinstance(chains, list):
+                routes.update(item for item in chains[:16] if isinstance(item, str))
             elapsed = max(now - previous["seen"], 0.001) if previous else 1
             row = {
                 "id": key,
@@ -113,6 +118,7 @@ class FlowMonitor:
             }
             self.flows[key] = row
             active.add(key)
+        self.active_routes = routes
         for key, row in list(self.flows.items()):
             if key not in active:
                 if now - row["seen"] > self.retention_seconds:

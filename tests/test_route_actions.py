@@ -191,7 +191,10 @@ def test_real_core_force_route_close_stream_and_restore_policy(tmp_path):
 
 
 @pytest.mark.skipif(os.name != "nt" or not bundled_location().is_file(), reason="Windows core")
-def test_real_core_fallback_rechecks_and_uses_working_route(tmp_path, monkeypatch):
+@pytest.mark.parametrize("strategy", ["fallback", "url-test", "load-balance"])
+def test_real_core_automatic_strategy_rechecks_and_uses_working_route(
+    tmp_path, monkeypatch, strategy
+):
     class Handler(BaseHTTPRequestHandler):
         def do_HEAD(self):
             self.send_response(204)
@@ -209,7 +212,7 @@ def test_real_core_fallback_rechecks_and_uses_working_route(tmp_path, monkeypatc
     url = f"http://127.0.0.1:{server.server_port}/"
     monkeypatch.setattr("nodera.core.CONNECTIVITY_URL", url)
     profile = Profile(
-        "fallback",
+        strategy,
         "",
         {
             "proxies": [
@@ -219,7 +222,7 @@ def test_real_core_fallback_rechecks_and_uses_working_route(tmp_path, monkeypatc
             "proxy-groups": [
                 {
                     "name": "automatic",
-                    "type": "fallback",
+                    "type": strategy,
                     "proxies": ["broken", "working"],
                     "url": url,
                     "interval": 300,
@@ -233,7 +236,8 @@ def test_real_core_fallback_rechecks_and_uses_working_route(tmp_path, monkeypatc
     try:
         core.start(profile, Settings(tun=False, system_proxy=False))
         assert core.recheck_routes() == ["automatic"]
-        assert core.groups()[0]["current"] == "working"
+        if strategy != "load-balance":
+            assert core.groups()[0]["current"] == "working"
         core.check_connectivity()
     finally:
         core.stop()

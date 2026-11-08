@@ -15,7 +15,7 @@ from nodera.locations import country
 from nodera.models import ClientError
 
 
-def physical_interface():
+def physical_interface(*, with_name=False):
     script = """
 $ErrorActionPreference='Stop'
 $adapters=@(Get-NetAdapter -Physical | Where-Object Status -eq 'Up')
@@ -23,7 +23,7 @@ $indices=@($adapters | ForEach-Object InterfaceIndex)
 $routes=@(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' | Where-Object { $_.InterfaceIndex -in $indices -and $_.NextHop -ne '0.0.0.0' } | Sort-Object RouteMetric)
 foreach($route in $routes) {
   $ip=Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $route.InterfaceIndex | Where-Object { $_.AddressState -eq 'Preferred' -and $_.IPAddress -notlike '169.254.*' } | Select-Object -First 1
-  if($ip) { @{index=[int]$route.InterfaceIndex;address=$ip.IPAddress} | ConvertTo-Json -Compress; exit 0 }
+  if($ip) { @{index=[int]$route.InterfaceIndex;address=$ip.IPAddress;name=$route.InterfaceAlias} | ConvertTo-Json -Compress; exit 0 }
 }
 exit 2
 """
@@ -46,6 +46,11 @@ exit 2
             or address.is_link_local
         ):
             raise ValueError
+        if with_name:
+            name = value.get("name")
+            if not isinstance(name, str) or not name:
+                raise ValueError
+            return index, str(address), name
         return index, str(address)
     except (OSError, ValueError, KeyError, subprocess.TimeoutExpired) as exc:
         raise ClientError(

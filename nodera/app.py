@@ -89,6 +89,10 @@ def main() -> int:
             if stale.is_dir():
                 shutil.rmtree(stale)
         store = Store(root)
+        if testing:
+            from nodera.demo import prepare_demo
+
+            prepare_demo(store)
         network_path = root / "test-network.json"
         if testing and subscription_proxy is None and network_path.exists():
             try:
@@ -116,10 +120,15 @@ def main() -> int:
         except ClientError as exc:
             library = ProfileLibrary()
             warning = str(exc)
-        window = MainWindow(store, settings, library.active, library=library)
+        if testing:
+            from nodera.demo import DemoWindow
+
+            window = DemoWindow(store, settings, library.active, library=library)
+        else:
+            window = MainWindow(store, settings, library.active, library=library)
         if testing:
             window.subscription_proxy = subscription_proxy
-            window.setWindowTitle("Nodera Test")
+            window.setWindowTitle("Nodera Test · Демо" if window.demo_mode else "Nodera Test")
             window.tray.setToolTip("Nodera Test")
             window.app_update_timer.stop()
             window.app_update_check.setEnabled(False)

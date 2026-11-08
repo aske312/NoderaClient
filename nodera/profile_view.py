@@ -2,6 +2,7 @@
 
 import math
 import time
+from dataclasses import replace
 from urllib.parse import urlsplit
 
 from nodera.models import Profile, Settings
@@ -23,6 +24,27 @@ def is_pro_subscription(profile: Profile | None) -> bool:
 
 def effective_tun(config: dict, settings: Settings) -> bool:
     return settings.tun
+
+
+def initial_subscription_settings(config: dict, settings: Settings) -> Settings:
+    """Seed supported settings from explicit Mihomo values on first activation."""
+    changes = {}
+    tun = config.get("tun", {})
+    if type(tun.get("enable")) is bool:
+        changes["tun"] = tun["enable"]
+    if tun.get("stack") in {"mixed", "system", "gvisor"}:
+        changes["tun_stack"] = tun["stack"]
+    mtu = tun.get("mtu")
+    if type(mtu) is int and 1280 <= mtu <= 9000:
+        changes["tun_mtu"] = mtu
+    if type(config.get("ipv6")) is bool:
+        changes["ipv6_mode"] = "on" if config["ipv6"] else "off"
+    port = config.get("mixed-port")
+    if type(port) is int and (port == 0 or 1024 <= port <= 65535):
+        changes["mixed_port"] = port
+    if config.get("log-level") in {"debug", "info", "warning", "error"}:
+        changes["log_level"] = config["log-level"]
+    return replace(settings, **changes)
 
 
 def format_bytes(value: int) -> str:

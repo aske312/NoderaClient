@@ -80,8 +80,9 @@ class MainWindow(
     FramelessWindowMixin, ProfilesMixin, WorkbenchMixin, PresentationMixin, FlowsMixin, QMainWindow
 ):
     shutdown_complete = Signal()
+    channel_progress = Signal(str)
 
-    def __init__(self, store, settings, profile, library=None):
+    def __init__(self, store, settings, profile, library=None, *, core=None):
         super().__init__()
         self.store, self.settings, self.profile = store, settings, profile
         self.library = library if library is not None else store.load_library()
@@ -89,7 +90,7 @@ class MainWindow(
             self.library = self.library.upsert(profile)
         self.profile_retry_at = {}
         self.pending_connect = False
-        self.core = Core(store.root / "runtime")
+        self.core = core if core is not None else Core(store.root / "runtime")
         self.core.trace.configure(settings.log_limit, settings.save_logs)
         self.core.connection_log.configure(
             settings.save_connection_logs,
@@ -130,8 +131,7 @@ class MainWindow(
         self.update_retry_at = 0.0
         self.setWindowTitle("Nodera")
         self.setWindowIcon(app_icon())
-        self.resize(1040, 720)
-        self.setMinimumSize(840, 620)
+        self.setFixedSize(840, 620)
         root = QWidget()
         self.configure_shell(root)
         content = QVBoxLayout(root)
@@ -345,19 +345,14 @@ class MainWindow(
             field.setting_row.setEnabled(field.isEnabled())
         self.flush_dns_button.setting_row.setEnabled(self.flush_dns_button.isEnabled())
         self.save_button.setEnabled(self.task is None and not self.closing)
-        self.update_button.setEnabled(
-            self.task is None and not self.closing and self.profile is not None
-        )
         self.import_button.setEnabled(self.task is None and not self.closing)
         self.profile_add.setEnabled(self.task is None and not self.closing)
         self.empty_profile_add.setEnabled(self.task is None and not self.closing)
         self.dashboard_update_button.setEnabled(
             self.task is None and not self.closing and self.profile is not None
         )
-        self.delete_button.setEnabled(idle and self.profile is not None)
-        self.rename_profile_button.setEnabled(
-            self.task is None and not self.closing and self.profile is not None
-        )
+        self.refresh_channel_controls()
+        self.refresh_card_controls()
         self.profile_list.setEnabled(self.task is None and not self.closing)
         self.profile_selector.setEnabled(self.task is None and not self.closing)
         self.connections_profile_selector.setEnabled(self.task is None and not self.closing)
@@ -402,23 +397,10 @@ class MainWindow(
                 date = "—"
             details = f"{urlsplit(profile.url).hostname} · {date}"
             self.profile_details.setText(details)
-            usage = profile.usage
-            text = f"Использовано: {size_text(usage.get('upload', 0) + usage.get('download', 0))}"
-            if usage.get("total"):
-                text += f" из {size_text(usage['total'])}"
-            if usage.get("expire"):
-                try:
-                    text += f" · До {datetime.fromtimestamp(usage['expire']):%d.%m.%Y}"
-                except (ValueError, OSError, OverflowError):
-                    pass
-            self.subscription_info.setText(
-                f"Обновлён: {date}\n{text}" if usage else f"Обновлён: {date}"
-            )
             self.hint.setText("")
         else:
             self.profile_title.setText("Нет профиля")
             self.profile_details.setText("Добавьте подписку")
-            self.subscription_info.setText("Подписка ещё не загружена.")
             self.hint.setText("")
         self.refresh_controls()
         self.refresh_policy()
@@ -508,6 +490,16 @@ class MainWindow(
         if not group:
             self.node_list.clear()
         if group:
+            current_routes = set()
+            if self.profile and self.profile.forced_server:
+                current_routes.add(self.profile.forced_server)
+            else:
+                current_routes.update(group.get("active", []))
+                if group.get("current"):
+                    current_routes.add(group["current"])
+                elif group.get("type") == "LoadBalance":
+                    current_routes.update(self.flow_monitor.active_routes)
+            active_routes = current_routes | self.flow_monitor.active_routes
             members = list(group["members"])
             if self.server_sort.currentData() == "name":
                 members.sort(key=lambda node: node["name"].casefold())
@@ -545,8 +537,17 @@ class MainWindow(
                     if node["delay"] > 0
                     else "нет ответа"
                 )
+                frozen = node["name"] in self.core.frozen_routes
+                is_current = self.connected and not frozen and node["name"] in current_routes
+                in_use = self.connected and not frozen and node["name"] in active_routes
                 active = (
-                    " · используется" if self.connected and node["name"] == group["current"] else ""
+                    " · Заморожен"
+                    if frozen
+                    else " · Текущий"
+                    if is_current
+                    else " · В работе"
+                    if in_use
+                    else ""
                 )
                 item = existing.get(node["name"])
                 if item is None:
@@ -575,15 +576,11 @@ class MainWindow(
                     Qt.ItemDataRole.UserRole + 1,
                     {
                         **node,
-                        "active": self.connected
-                        and (
-                            node["name"] == self.profile.forced_server
-                            if self.profile and self.profile.forced_server
-                            else node["name"] in group.get("active", [group["current"]])
-                        ),
+                        "active": in_use,
+                        "current": is_current,
                         "forced": bool(self.profile and self.profile.forced_server == node["name"]),
                         "can_force": bool(definition),
-                        "frozen": node["name"] in self.core.frozen_routes,
+                        "frozen": frozen,
                         "retry_in": max(
                             0, int(self.core.frozen_routes.get(node["name"], 0) - time.monotonic())
                         ),
@@ -613,7 +610,7 @@ class MainWindow(
                 if node["name"] in self.core.frozen_routes:
                     item.setToolTip(
                         item.toolTip()
-                        + "\nЗаморожен после двух ошибок. Возврат — не раньше 2 минут и после успешной проверки."
+                        + "\nЗаморожен после трёх ошибок подряд. Успешная проверка сразу возвращает маршрут в работу."
                     )
                 if node["name"] == (previous or group["current"]):
                     self.node_list.setCurrentItem(item)
@@ -843,7 +840,7 @@ class MainWindow(
                 lambda: self.core.stop("user disconnect"), lambda _: self.set_disconnected()
             )
         elif self.profile:
-            if self.settings.tun and not is_admin():
+            if self.settings.tun and not getattr(self.core, "demo", False) and not is_admin():
                 try:
                     self.store.save_settings(self.settings)
                     if launch_admin(wait_for_pid=os.getpid()):
@@ -941,7 +938,7 @@ class MainWindow(
 
         self.start_inspection("connectivity", self.core.check_connectivity, checked, failed)
 
-    def recover_routes(self):
+    def recover_routes(self, proactive=False):
         import time
 
         if (
@@ -967,7 +964,8 @@ class MainWindow(
         ):
             return
         self.route_recovery_at = time.monotonic()
-        self.hint.setText("Проверяем альтернативные маршруты…")
+        if not proactive:
+            self.hint.setText("Проверяем альтернативные маршруты…")
 
         def done(names):
             if self.connected and names:
@@ -986,6 +984,7 @@ class MainWindow(
         self.connected = True
         self.session_profile = deepcopy(self.profile)
         self.network_checks_enabled = verify
+        self.route_recovery_at = float("-inf")
         self.session_tun = effective_tun(self.profile.config if self.profile else {}, self.settings)
         self.session_time.setText("00:00:00")
         self.refresh_session_visibility()
@@ -1198,6 +1197,8 @@ class MainWindow(
             self.hide()
             return
         self.closing = True
+        if self.channel_cancel:
+            self.channel_cancel.set()
         self.shutdown_event.set()
         self.core.cancel_start()
         for timer in self.findChildren(QTimer):

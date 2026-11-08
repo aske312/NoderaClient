@@ -14,26 +14,56 @@ def samples(a=0, b=10):
     return {"a": {"value": a}, "b": {"value": b}}
 
 
-def test_freeze_needs_two_failures_and_healthy_alternative_and_rechecks_after_timeout():
+def test_freeze_needs_three_failures_and_healthy_alternative_and_recovers_immediately():
     health = RouteHealth()
     health.update(samples(), 0)
     assert not health.frozen
     health.update(samples(), 10)
-    assert health.frozen == {"a": 130}
-    health.update(samples(10), 60)
-    assert "a" in health.frozen
-    health.update(samples(10, 0), 70)
-    health.update(samples(10, 0), 80)
-    assert set(health.frozen) == {"a"}
-    health.update(samples(), 131)
-    assert "a" in health.frozen
-    health.update(samples(10), 132)
     assert not health.frozen
+    health.update(samples(), 20)
+    assert health.frozen == {"a": 35}
+    health.update(samples(10), 21)
+    assert not health.frozen
+    health.update(samples(), 22)
+    health.update(samples(), 23)
+    assert not health.frozen  # The recovery cleared the failure streak.
     health.update(samples(0, 0), 200)
     health.update(samples(0, 0), 210)
+    health.update(samples(0, 0), 215)
     assert not health.frozen and not health.failures
     health.update(samples(), 220)
     assert not health.frozen
+
+
+def test_duplicate_and_stale_probe_results_cannot_freeze_or_refreeze_a_route():
+    health = RouteHealth()
+
+    def batch(a, stamp):
+        return {"a": {"value": a, "checked_at": stamp}, "b": {"value": 10, "checked_at": stamp}}
+
+    health.update(batch(0, 100), 0)
+    health.update(batch(0, 100), 1)
+    health.update(batch(0, 100), 2)
+    assert health.failures["a"] == 1 and not health.frozen
+    health.update(batch(0, 101), 3)
+    health.update(batch(0, 102), 4)
+    assert "a" in health.frozen
+    health.update(batch(10, 103), 5)
+    assert not health.frozen
+    health.update(batch(0, 102), 6)
+    assert not health.frozen and health.failures["a"] == 0
+
+
+def test_success_before_next_probe_time_recovers_last_healthy_route_during_outage():
+    health = RouteHealth()
+    for now in range(3):
+        health.update(samples(), now)
+    assert "a" in health.frozen
+    health.update(samples(10, 0), 3)
+    assert not health.frozen
+    assert health.failures["b"] == 1
+    health.update(samples(0, 0), 4)
+    assert not health.frozen and not health.failures
 
 
 def test_quarantine_blocks_outbound_but_retains_isolated_probe_and_does_not_mutate_source():
@@ -57,6 +87,7 @@ def test_failed_apply_does_not_publish_unenforced_freeze(tmp_path, monkeypatch):
         raise ClientError("reload failed")
 
     monkeypatch.setattr(core, "_reload_quarantine", fail)
+    core.update_route_health(samples())
     core.update_route_health(samples())
     with pytest.raises(ClientError):
         core.update_route_health(samples())
@@ -124,6 +155,8 @@ def test_real_core_quarantine_failover_probe_and_recovery(tmp_path, monkeypatch)
         core.update_route_health(samples())
         assert not core.frozen_routes
         core.update_route_health(samples())
+        assert not core.frozen_routes
+        core.update_route_health(samples())
         assert "a" in core.frozen_routes
         group = core.groups()[0]
         assert group["current"] == "b"
@@ -134,10 +167,6 @@ def test_real_core_quarantine_failover_probe_and_recovery(tmp_path, monkeypatch)
         core.check_connectivity()
         enabled.set()
         assert core.delay("a") > 0  # probes the original, while normal outbound is Reject
-        core.update_route_health(samples(10))
-        assert "a" in core.frozen_routes
-        core.route_health.frozen["a"] = 0
-        core.update_route_health(samples(10))
         assert not core.frozen_routes
         assert core.groups()[0]["members"][0]["type"] == "Http"
         core.force_server("a")

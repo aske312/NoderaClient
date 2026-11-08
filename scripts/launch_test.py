@@ -103,7 +103,14 @@ def build(root=ROOT, *, progress=True):
     try:
         with log.open("w", encoding="utf-8") as output:
             process = subprocess.Popen(
-                ["powershell.exe", "-NoProfile", "-File", str(root / "scripts/build-test.ps1")],
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(root / "scripts/build-test.ps1"),
+                ],
                 cwd=root,
                 stdout=output,
                 stderr=subprocess.STDOUT,

@@ -101,7 +101,6 @@ class WorldMap(QWidget):
         self.hit_regions = []
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        available_height = max(50, self.height() - self.bottom_inset - self.top_inset)
         locations = self.locations
         if self.client_point:
             locations = [{**self.client_point, "role": "client", "step": -1}, *locations]
@@ -257,13 +256,6 @@ class WorldMap(QWidget):
                 text, Qt.TextElideMode.ElideRight, int(badge.width() - 35)
             )
             painter.drawText(badge.adjusted(29, 0, -6, 0), Qt.AlignmentFlag.AlignVCenter, text)
-        if self.connected and not self.locations:
-            painter.setPen(QColor("#91a6b3"))
-            painter.drawText(
-                QRectF(0, self.top_inset, self.width(), available_height - 4),
-                Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter,
-                "Локация не указана",
-            )
 
 
 class WorldCanvas(QWidget):

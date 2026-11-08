@@ -132,6 +132,7 @@ class Controller:
     def recheck_routes(self, names, url=TEST_URL):
         proxies = self.proxies()
         checked = []
+        failures = []
         pending, visited = list(names), set()
         while pending:
             name = pending.pop(0)
@@ -146,17 +147,23 @@ class Controller:
             )
             if proxies.get(name, {}).get("type") not in {"Fallback", "URLTest", "LoadBalance"}:
                 continue
-            self.request(
-                "GET",
-                "/group/" + quote(name, safe="") + "/delay",
-                params={
-                    "url": group.get("testUrl") or url,
-                    "timeout": 5000,
-                    "expected": group.get("expectedStatus") or "204",
-                },
-                timeout=8,
-            )
+            try:
+                self.request(
+                    "GET",
+                    "/group/" + quote(name, safe="") + "/delay",
+                    params={
+                        "url": group.get("testUrl") or url,
+                        "timeout": 5000,
+                        "expected": group.get("expectedStatus") or "204",
+                    },
+                    timeout=8,
+                )
+            except ClientError as exc:
+                failures.append(exc)
+                continue
             checked.append(name)
+        if failures and not checked:
+            raise failures[0]
         return checked
 
     def delay(self, name: str) -> int:

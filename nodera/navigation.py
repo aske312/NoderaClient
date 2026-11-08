@@ -65,6 +65,7 @@ class NavigationDock(QFrame):
         self.tools.setToolTip("Инструменты · Ctrl+K")
         self.tools.clicked.connect(self.toggle_palette)
         chevron = label("")
+        self.tools_chevron = chevron
         chevron.setParent(self.tools)
         chevron.setPixmap(line_icon("chevron-up").pixmap(10, 10))
         chevron.setGeometry(115, 11, 10, 10)
@@ -82,6 +83,7 @@ class NavigationDock(QFrame):
             2: "Параметры клиента",
             7: "Версия и обновления",
         }
+        self.secondary_pages = list(descriptions)
         for index, description in descriptions.items():
             title, icon = self.pages[index]
             button = QPushButton()
@@ -112,6 +114,28 @@ class NavigationDock(QFrame):
         self.palette.hide()
         self.selected.emit(index)
 
+    def add_tool_page(self, index, title, icon, description=""):
+        self.pages[index] = title, icon
+        self.secondary_pages.append(index)
+        button = QPushButton()
+        button.setObjectName("navigationEntry")
+        button.setFixedHeight(34)
+        button.setCheckable(True)
+        button.setAccessibleName(title)
+        button.setToolTip(description)
+        row = QHBoxLayout(button)
+        row.setContentsMargins(9, 5, 9, 5)
+        row.setSpacing(9)
+        image = label("")
+        image.setPixmap(line_icon(icon).pixmap(16, 16))
+        row.addWidget(image)
+        row.addWidget(label(title, "navigationTitle"), 1)
+        for child in button.findChildren(type(image)):
+            child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        button.clicked.connect(lambda checked=False: self.choose(index))
+        self.buttons[index] = button
+        self.palette.layout().addWidget(button)
+
     def set_has_subscription(self, available):
         for index in self.subscription_pages:
             self.buttons[index].setVisible(available)
@@ -123,8 +147,12 @@ class NavigationDock(QFrame):
         self.current_index = index
         for page, button in self.buttons.items():
             button.setChecked(page == index)
-        secondary = index in (6, 8, 2, 7)
+        secondary = index in self.secondary_pages
         title, icon = self.pages[index] if secondary else ("Инструменты", "settings")
+        self.tools.setFixedWidth(
+            max(132, self.tools.fontMetrics().horizontalAdvance(title) + 60) if secondary else 132
+        )
+        self.tools_chevron.move(self.tools.width() - 17, 11)
         self.tools.setText(title)
         self.tools.setIcon(line_icon(icon))
         self.tools.setChecked(secondary)
@@ -145,5 +173,5 @@ class NavigationDock(QFrame):
         y = max(screen.top() + 8, anchor.y() - self.palette.height() - 8)
         self.palette.move(x, y)
         self.palette.show()
-        entries = [index for index in (6, 8, 2, 7) if not self.buttons[index].isHidden()]
+        entries = [index for index in self.secondary_pages if not self.buttons[index].isHidden()]
         self.buttons[self.current_index if self.current_index in entries else entries[0]].setFocus()

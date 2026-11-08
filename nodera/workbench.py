@@ -798,6 +798,7 @@ class WorkbenchMixin:
 
     def periodic_delays(self):
         if self.connected and self.core.running:
+            self.recover_routes(proactive=True)
             self.test_group()
 
     def build_settings(self):

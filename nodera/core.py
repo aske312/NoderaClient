@@ -297,8 +297,9 @@ def serialized(method):
 
 
 class Core:
-    def __init__(self, root: Path, core_resolver=None):
+    def __init__(self, root: Path, core_resolver=None, *, outbound_interface=None):
         self.root = root
+        self.outbound_interface = outbound_interface
         self._operation_lock = threading.RLock()
         self._stop_requested = threading.Event()
         self.route_health = RouteHealth()
@@ -388,6 +389,8 @@ class Core:
             config = runtime_config(
                 profile.config, settings, self.port, self.secret, profile.local_rules, address_range
             )
+            if self.outbound_interface:
+                config["interface-name"] = self.outbound_interface
             self._rule_cache = RuleCache(
                 self.root.parent, profile, config, self.runtime, self._record
             )
@@ -709,9 +712,12 @@ class Core:
         if not self.running:
             raise ClientError("Сначала запустите подключение.")
         with Controller(self.port, self.secret) as controller:
-            return controller.delay(
+            delay = controller.delay(
                 probe_name(member) if member in self.route_health.frozen else member
             )
+        if member in self.route_health.frozen:
+            self.update_route_health({member: {"value": delay, "checked_at": time.time()}})
+        return delay
 
     @serialized
     def probe_aliases(self):
@@ -724,6 +730,7 @@ class Core:
         previous = copy.deepcopy(self.route_health)
         self.route_health.update(values, time.monotonic())
         if set(previous.frozen) == set(self.route_health.frozen):
+            self.frozen_routes = dict(self.route_health.frozen)
             return
         try:
             self._reload_quarantine(previous)
@@ -783,6 +790,8 @@ class Core:
         config = runtime_config(
             profile.config, self._session_settings, self.port, self.secret, profile.local_rules
         )
+        if self.outbound_interface:
+            config["interface-name"] = self.outbound_interface
         for key in ("tun", "mixed-port", "ipv6"):
             if key in self._base_config:
                 config[key] = copy.deepcopy(self._base_config[key])

@@ -162,6 +162,7 @@ def test_global_checks_all_routes_and_periodic_refresh_preserves_selection(tmp_p
     assert len(calls[0]) == 40 and window.current_node() == selected
     assert "40/40" in window.delay_status.text()
     monkeypatch.setattr(type(window.core), "running", property(lambda _: True))
+    monkeypatch.setattr(window.core, "recheck_routes", lambda: [])
     window.delay_timer.timeout.emit()
     wait(app, lambda: not window.inspections)
     assert len(calls) == 2

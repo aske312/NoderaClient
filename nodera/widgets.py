@@ -297,18 +297,33 @@ class NodeDelegate(QStyledItemDelegate):
         return QSize(max(200, self.parent().viewport().width() - 2), 54)
 
     def paint(self, painter, option, index):
-        from nodera.server_assets import flag_pixmap, protocol_pixmap
+        from nodera.server_assets import flag_pixmap, protocol_status_pixmap, route_visual_state
 
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect = QRectF(option.rect).adjusted(1, 1, -2, -2)
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         data = index.data(Qt.ItemDataRole.UserRole + 1) or {}
+        health = route_visual_state(data)
+        health_color = {"frozen": "#8edbfa", "error": "#f1767c", "slow": "#e8b65d"}.get(health)
+        frozen = bool(data.get("frozen"))
+        active = bool(data.get("active")) and not frozen
+        current = bool(data.get("current")) and not frozen
         hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
         painter.fillRect(
             rect,
             QColor(
-                "#173630"
+                "#142e40"
+                if frozen
+                else "#35232c"
+                if health == "error"
+                else "#322e23"
+                if health == "slow"
+                else "#164451"
+                if current
+                else "#173c34"
+                if active
+                else "#173630"
                 if data.get("forced")
                 else "#142f39"
                 if selected or hovered
@@ -319,6 +334,14 @@ class NodeDelegate(QStyledItemDelegate):
         )
         painter.setPen(QPen(QColor("#1b3440"), 1))
         painter.drawLine(rect.bottomLeft(), rect.bottomRight())
+        if health_color or active or current:
+            painter.fillRect(
+                QRectF(rect.left(), rect.top() + 4, 3, rect.height() - 8),
+                QColor(health_color or ("#61d9ee" if current else "#69c8aa")),
+            )
+        if selected or current:
+            painter.setPen(QPen(QColor("#61d9ee" if current else "#4e8394"), 1))
+            painter.drawRect(rect.adjusted(4, 1, -1, -1))
         center = QPointF(rect.left() + 18, rect.center().y())
         star = QPolygonF()
         for step in range(10):
@@ -336,9 +359,9 @@ class NodeDelegate(QStyledItemDelegate):
         )
         painter.setBrush(QColor("#e4c77c") if data.get("forced") else Qt.BrushStyle.NoBrush)
         painter.drawPolygon(star)
-        icon = protocol_pixmap(data.get("type", ""))
+        icon = protocol_status_pixmap(str(data.get("type", "")), health)
         painter.drawPixmap(
-            QRectF(rect.left() + 38, rect.top() + 11, 28, 28), icon, QRectF(icon.rect())
+            QRectF(rect.left() + 32, rect.top() + 5, 40, 40), icon, QRectF(icon.rect())
         )
         left = rect.left() + 76
         font = option.font
@@ -347,15 +370,29 @@ class NodeDelegate(QStyledItemDelegate):
         painter.setFont(font)
         painter.setPen(QColor("#e2edf4"))
         title = str(index.data(Qt.ItemDataRole.UserRole) or "")
+        delay = data.get("delay")
+        delay_text = (
+            "Не проверен" if delay is None else f"{delay} мс" if delay > 0 else "Нет ответа"
+        )
+        delay_width = painter.fontMetrics().horizontalAdvance(delay_text)
+        status = "Заморожен" if frozen else "Текущий" if current else "В работе" if active else ""
+        status_width = painter.fontMetrics().horizontalAdvance(status) + 16 if status else 0
+        right_reserved = max(100, delay_width + status_width + (34 if status else 24))
         title = painter.fontMetrics().elidedText(
-            title, Qt.TextElideMode.ElideRight, max(0, int(rect.width() - 181))
+            title, Qt.TextElideMode.ElideRight, max(0, int(rect.width() - 76 - right_reserved))
         )
         painter.drawText(QPointF(left, rect.top() + 21), title)
-        delay = data.get("delay")
-        text = "Не проверен" if delay is None else f"{delay} мс" if delay > 0 else "Нет ответа"
-        painter.setPen(
-            QColor("#86d7ca" if delay and delay > 0 else "#b3a084" if delay == 0 else "#6f8a9c")
-        )
+        if status:
+            badge = QRectF(
+                rect.right() - delay_width - status_width - 22, rect.top() + 5, status_width, 22
+            )
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#244c62" if frozen else "#236b7c" if current else "#24594b"))
+            painter.drawRoundedRect(badge, 6, 6)
+            painter.setPen(QColor("#bcecff" if frozen else "#d2f9ff" if current else "#a4e6cd"))
+            painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, status)
+        text = delay_text
+        painter.setPen(QColor(health_color or ("#86d7ca" if delay and delay > 0 else "#6f8a9c")))
         painter.drawText(
             QPointF(
                 rect.right() - painter.fontMetrics().horizontalAdvance(text) - 12, rect.top() + 21
@@ -380,14 +417,12 @@ class NodeDelegate(QStyledItemDelegate):
         text = str(data.get("type", "")).upper()
         if data.get("frozen"):
             text = (
-                "Пауза: " + str(data["retry_in"]) + " с · "
+                "Повторная проверка через " + str(data["retry_in"]) + " с · "
                 if data.get("retry_in")
-                else "Пауза · Ожидает успешной проверки · "
+                else "Ожидает успешной проверки · "
             ) + text
         if data.get("forced"):
             text = "Закреплён · " + text
-        if data.get("active"):
-            text += " · В работе"
         endpoint = data.get("endpoint", "")
         if endpoint:
             text += " · " + endpoint
