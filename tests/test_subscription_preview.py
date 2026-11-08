@@ -17,7 +17,7 @@ from nodera.ui import MainWindow
 
 def wait(window, app):
     end = time.monotonic() + 5
-    while window.task or window.inspections:
+    while window.task or window.inspections or window.pending_connect:
         assert time.monotonic() < end
         QTest.qWait(10)
         app.processEvents()

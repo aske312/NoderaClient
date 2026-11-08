@@ -18,6 +18,23 @@ def test_automatic_ports_are_distinct_and_skip_an_occupied_preference():
         assert preferred not in (proxy, controller)
 
 
+def test_mixed_port_skips_a_preference_occupied_only_by_udp():
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+        if os.name == "nt":
+            udp.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        udp.bind(("127.0.0.1", 0))
+        preferred = udp.getsockname()[1]
+        # A TCP-only check would accept this port even though Mihomo cannot use it.
+        with socket.socket() as tcp:
+            tcp.bind(("127.0.0.1", preferred))
+        proxy, controller = choose_ports(preferred)
+        assert proxy != preferred
+        assert proxy != controller
+        with socket.socket() as tcp, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            tcp.bind(("127.0.0.1", proxy))
+            probe.bind(("127.0.0.1", proxy))
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows TCP API")
 def test_windows_listener_ownership_is_the_real_process():
     with socket.socket() as sock:

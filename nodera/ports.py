@@ -8,8 +8,8 @@ from ctypes import wintypes
 from nodera.models import ClientError
 
 
-def bound_socket(port=0):
-    sock = socket.socket()
+def bound_socket(port=0, kind=socket.SOCK_STREAM):
+    sock = socket.socket(socket.AF_INET, kind)
     try:
         if os.name == "nt":
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
@@ -21,17 +21,19 @@ def bound_socket(port=0):
 
 
 def choose_ports(preferred=0):
-    try:
+    # Mihomo's mixed listener needs both protocols. Windows may reserve a port
+    # for UDP while allowing TCP, so ask UDP for a candidate before checking TCP.
+    last_error = None
+    for attempt in range(32):
         try:
-            proxy = bound_socket(preferred)
-        except OSError:
-            proxy = bound_socket()
-        with proxy, bound_socket() as controller:
-            return proxy.getsockname()[1], controller.getsockname()[1]
-    except OSError as exc:
-        raise ClientError(
-            "Windows не предоставила свободные локальные порты. Проверьте сетевые ограничения системы."
-        ) from exc
+            with bound_socket(preferred if attempt == 0 else 0, socket.SOCK_DGRAM) as udp:
+                with bound_socket(udp.getsockname()[1]) as proxy, bound_socket() as controller:
+                    return proxy.getsockname()[1], controller.getsockname()[1]
+        except OSError as exc:
+            last_error = exc
+    raise ClientError(
+        "Windows не предоставила свободные локальные порты. Проверьте сетевые ограничения системы."
+    ) from last_error
 
 
 class TcpRow(ctypes.Structure):
