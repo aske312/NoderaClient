@@ -86,11 +86,14 @@ def test_subscription_selectors_fit_selected_text_and_keep_full_names(tmp_path):
                 selector.currentText()
             )
         wide = window.profile_selector.width()
+        connections_wide = window.connections_profile_selector.width()
         window.profile.name = "Дом"
         window.refresh_profile()
         assert window.profile_selector.currentText() == "Дом"
         assert window.profile_selector.width() < wide
-        assert window.connections_profile_selector.width() == window.profile_selector.width()
+        # The compact map header and connections toolbar use different font sizes.
+        assert window.connections_profile_selector.currentText() == "Дом"
+        assert window.connections_profile_selector.width() < connections_wide
         assert window.nav[4].text() == "Подключения"
         assert not hasattr(window, "geo_button")
     finally:
@@ -296,8 +299,13 @@ def test_home_status_tag_is_below_the_power_button(tmp_path):
         assert window.network_tag.text() == "Отключено"
         window.connected = True
         window.network_state = "error"
+        window.groups_data = [{"name": "main", "current": "route-0"}]
+        window.delay_results[(window.profile.id, "route-0")] = {
+            "value": 0,
+            "checked_at": time.time(),
+        }
         window.update_network_tag()
-        assert window.network_tag.text() == "Проблемы сети"
+        assert window.network_tag.text() == "Нет ответа"
     finally:
         window.connected = False
         window.close()

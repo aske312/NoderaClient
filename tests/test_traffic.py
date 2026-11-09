@@ -14,7 +14,7 @@ import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 import httpx
@@ -25,6 +25,7 @@ from nodera.bundled_core import bundled_location
 from nodera.core import CREATE_FLAGS, Core, runtime_config
 from nodera.geodata import prepare_session_geodata
 from nodera.models import ClientError, Profile, Settings
+from tests.loopback import ThreadingHTTPServer
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

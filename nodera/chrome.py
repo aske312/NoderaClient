@@ -114,22 +114,38 @@ class WindowButton(QPushButton):
 
 
 class TitleBar(QWidget):
-    def __init__(self, window):
+    def __init__(self, window, *, compact=False):
         super().__init__()
         self.target = window
         self.setObjectName("titleBar")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setFixedHeight(34)
+        self.compact = compact
+        self.setProperty("compact", compact)
+        self.setFixedHeight(28 if compact else 34)
         self._drag = None
         self._native_drag = False
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 4, 8, 4)
+        if compact:
+            layout.setContentsMargins(12, 2, 6, 2)
+        else:
+            layout.setContentsMargins(12, 4, 8, 4)
         layout.setSpacing(4)
-        icon = label("")
-        icon.setPixmap(app_icon().pixmap(18, 18))
-        title = label("Nodera", "windowTitle")
-        window.windowTitleChanged.connect(title.setText)
-        for widget in (icon, title):
+        self.title_label = label("", "windowTitle")
+        self.title_label.setParent(self)
+
+        def update_title(value):
+            text = value.replace("Nodera", "").strip().replace(" ?", "?") if compact else value
+            self.title_label.setText(text)
+            self.title_label.setVisible(bool(text))
+
+        window.windowTitleChanged.connect(update_title)
+        update_title(window.windowTitle() or ("" if compact else "Nodera"))
+        widgets = [self.title_label]
+        if not compact:
+            icon = label("")
+            icon.setPixmap(app_icon().pixmap(18, 18))
+            widgets.insert(0, icon)
+        for widget in widgets:
             widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             layout.addWidget(widget)
         layout.addStretch()
@@ -137,6 +153,8 @@ class TitleBar(QWidget):
         self.close_button = WindowButton("close", window)
         for button in (self.minimize, self.close_button):
             layout.addWidget(button)
+        if compact:
+            self.minimize.hide()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -167,8 +185,9 @@ class TitleBar(QWidget):
 
     def show_menu(self, position):
         menu = QMenu(self)
-        menu.addAction("Свернуть", self.target.showMinimized)
-        menu.addSeparator()
+        if not self.compact:
+            menu.addAction("Свернуть", self.target.showMinimized)
+            menu.addSeparator()
         menu.addAction("Закрыть", self.target.close)
         menu.exec(position)
 

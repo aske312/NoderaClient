@@ -36,6 +36,35 @@ def label(text: str, kind: str = "", wrap: bool = False) -> QLabel:
     return widget
 
 
+class ElidedLabel(QLabel):
+    """Keep the full value available while painting one bounded line."""
+
+    def __init__(self):
+        super().__init__()
+        self.setTextFormat(Qt.TextFormat.PlainText)
+
+    def setText(self, text):
+        super().setText(text)
+        self.setToolTip(text)
+
+    def minimumSizeHint(self):
+        return QSize(0, self.fontMetrics().height())
+
+    def paintEvent(self, event):
+        painter = QStylePainter(self)
+        text = self.fontMetrics().elidedText(
+            self.text(), Qt.TextElideMode.ElideRight, self.contentsRect().width()
+        )
+        painter.drawItemText(
+            self.contentsRect(),
+            self.alignment(),
+            self.palette(),
+            self.isEnabled(),
+            text,
+            self.foregroundRole(),
+        )
+
+
 def card() -> tuple[QFrame, QVBoxLayout]:
     frame = QFrame()
     frame.setObjectName("card")
@@ -305,7 +334,7 @@ class NodeDelegate(QStyledItemDelegate):
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         data = index.data(Qt.ItemDataRole.UserRole + 1) or {}
         health = route_visual_state(data)
-        health_color = {"frozen": "#8edbfa", "error": "#f1767c", "slow": "#e8b65d"}.get(health)
+        health_color = {"frozen": "#6f9faf", "error": "#b26d73", "slow": "#b49764"}.get(health)
         frozen = bool(data.get("frozen"))
         active = bool(data.get("active")) and not frozen
         current = bool(data.get("current")) and not frozen
@@ -313,17 +342,17 @@ class NodeDelegate(QStyledItemDelegate):
         painter.fillRect(
             rect,
             QColor(
-                "#142e40"
+                "#152a35"
                 if frozen
-                else "#35232c"
+                else "#2a2127"
                 if health == "error"
-                else "#322e23"
+                else "#29271f"
                 if health == "slow"
-                else "#164451"
+                else "#14343e"
                 if current
-                else "#173c34"
+                else "#152e29"
                 if active
-                else "#173630"
+                else "#152b27"
                 if data.get("forced")
                 else "#142f39"
                 if selected or hovered
@@ -337,10 +366,10 @@ class NodeDelegate(QStyledItemDelegate):
         if health_color or active or current:
             painter.fillRect(
                 QRectF(rect.left(), rect.top() + 4, 3, rect.height() - 8),
-                QColor(health_color or ("#61d9ee" if current else "#69c8aa")),
+                QColor(health_color or ("#5998a6" if current else "#679681")),
             )
         if selected or current:
-            painter.setPen(QPen(QColor("#61d9ee" if current else "#4e8394"), 1))
+            painter.setPen(QPen(QColor("#5998a6" if current else "#4e8394"), 1))
             painter.drawRect(rect.adjusted(4, 1, -1, -1))
         center = QPointF(rect.left() + 18, rect.center().y())
         star = QPolygonF()
@@ -353,11 +382,11 @@ class NodeDelegate(QStyledItemDelegate):
         )
         painter.setPen(
             QPen(
-                QColor("#e4c77c" if data.get("forced") else "#78959f" if enabled else "#354c57"),
+                QColor("#b19d6b" if data.get("forced") else "#78959f" if enabled else "#354c57"),
                 1.3,
             )
         )
-        painter.setBrush(QColor("#e4c77c") if data.get("forced") else Qt.BrushStyle.NoBrush)
+        painter.setBrush(QColor("#b19d6b") if data.get("forced") else Qt.BrushStyle.NoBrush)
         painter.drawPolygon(star)
         icon = protocol_status_pixmap(str(data.get("type", "")), health)
         painter.drawPixmap(
@@ -387,12 +416,12 @@ class NodeDelegate(QStyledItemDelegate):
                 rect.right() - delay_width - status_width - 22, rect.top() + 5, status_width, 22
             )
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor("#244c62" if frozen else "#236b7c" if current else "#24594b"))
+            painter.setBrush(QColor("#203743" if frozen else "#1b434e" if current else "#1c3d33"))
             painter.drawRoundedRect(badge, 6, 6)
-            painter.setPen(QColor("#bcecff" if frozen else "#d2f9ff" if current else "#a4e6cd"))
+            painter.setPen(QColor("#91b0bf" if frozen else "#96bac2" if current else "#94b8a6"))
             painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, status)
         text = delay_text
-        painter.setPen(QColor(health_color or ("#86d7ca" if delay and delay > 0 else "#6f8a9c")))
+        painter.setPen(QColor(health_color or ("#7fa99f" if delay and delay > 0 else "#6f8a9c")))
         painter.drawText(
             QPointF(
                 rect.right() - painter.fontMetrics().horizontalAdvance(text) - 12, rect.top() + 21

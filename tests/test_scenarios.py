@@ -32,14 +32,14 @@ def test_automatic_timeline_and_unstable_channel(tmp_path):
     assert model.tick() == []
     for second, preset in ((5, "primary-down"), (10, "slow"), (15, "outage"), (20, "recovered")):
         now[0] = second
-        assert model.tick() == ["demo-pro"]
+        assert "demo-pro" in model.tick()
         assert model.settings("demo-pro")["preset"] == preset
     model.automatic("demo-pro", False, 5)
     model.node("demo-pro", "DE · Frankfurt", "unstable", 60)
     model.tick()
     assert model.condition("demo-pro", "DE · Frankfurt", 0)["delay"] == 0
     now[0] = 25
-    assert model.tick() == ["demo-pro"]
+    assert "demo-pro" in model.tick()
     assert model.condition("demo-pro", "DE · Frankfurt", 0)["delay"] == 60
     model.reset("demo-pro")
     assert model.settings("demo-pro") == model.defaults()

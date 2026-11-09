@@ -3,7 +3,6 @@
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QDialog,
     QDialogButtonBox,
     QFrame,
     QHBoxLayout,
@@ -18,6 +17,7 @@ from PySide6.QtWidgets import (
 from nodera.controls import ComboBox
 from nodera.geolocation import valid_host
 from nodera.locations import map_data
+from nodera.modals import AppDialog
 from nodera.server_assets import flag_pixmap
 from nodera.widgets import label
 
@@ -27,14 +27,14 @@ class HopRow(QFrame):
         super().__init__()
         self.setObjectName("routeHop")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 12, 10, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
         self.number = label("", "hopNumber")
         self.number.setFixedSize(24, 24)
         self.number.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.number, 0, Qt.AlignmentFlag.AlignTop)
         fields = QVBoxLayout()
-        fields.setSpacing(7)
+        fields.setSpacing(4)
         row = QHBoxLayout()
         self.role = ComboBox()
         for key, text in (("relay", "Вход / Relay"), ("cdn", "CDN"), ("server", "Выход")):
@@ -70,7 +70,7 @@ class HopRow(QFrame):
             (self.remove, "Удалить участок", lambda: editor.remove_hop(self)),
         ):
             button.setObjectName("hopAction")
-            button.setFixedSize(24, 23)
+            button.setFixedSize(22, 19)
             button.setIconSize(QSize(12, 12))
             button.setToolTip(title)
             button.setAccessibleName(title)
@@ -85,21 +85,20 @@ class HopRow(QFrame):
         return result
 
 
-class RouteDialog(QDialog):
+class RouteDialog(AppDialog):
     def __init__(self, hops, parent=None, node_name=""):
         super().__init__(parent)
+        self.fit_content = False
         self.setWindowTitle("Маршрут на карте")
-        self.resize(660, min(580, 240 + 100 * len(hops or [{}])))
-        self.setMinimumSize(600, 360)
+        self.resize(600, min(468, 130 + 84 * len(hops or [{}])))
+        self.setMinimumSize(540, 220)
         self.automatic = False
         self.hop_rows = []
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 18, 20, 18)
-        layout.setSpacing(12)
-        layout.addWidget(label(node_name or "Маршрут на карте", "profileName", True))
-        layout.addWidget(
-            label("Участки от входа до выхода. Настройка отображения на карте.", "muted", True)
-        )
+        layout = self.content_layout()
+        layout.setSpacing(8)
+        if node_name:
+            layout.addWidget(label(node_name, "profileName", True))
+        layout.addWidget(label("Участки от входа к выходу.", "muted", True))
         scroll = QScrollArea()
         self.scroll = scroll
         scroll.setWidgetResizable(True)
@@ -108,18 +107,18 @@ class RouteDialog(QDialog):
         container = QWidget()
         self.rows_layout = QVBoxLayout(container)
         self.rows_layout.setContentsMargins(0, 0, 4, 0)
-        self.rows_layout.setSpacing(8)
+        self.rows_layout.setSpacing(6)
         self.rows_layout.addStretch()
         scroll.setWidget(container)
         layout.addWidget(scroll, 1)
         self.add_button = QPushButton("+ Добавить участок")
         self.add_button.setObjectName("quietAction")
         self.add_button.clicked.connect(lambda: self.add_hop({"role": "relay", "country": ""}))
-        layout.addWidget(self.add_button, 0, Qt.AlignmentFlag.AlignLeft)
         self.message = label("", "routeEditorError", True)
         self.message.hide()
         layout.addWidget(self.message)
         footer = QHBoxLayout()
+        footer.addWidget(self.add_button)
         reset = QPushButton("Из подписки")
         reset.setObjectName("quietAction")
         reset.setToolTip("Убрать ручные изменения маршрута")

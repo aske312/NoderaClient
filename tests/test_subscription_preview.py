@@ -24,7 +24,7 @@ def wait(window, app):
 
 
 @pytest.fixture
-def library_window(tmp_path):
+def library_window(tmp_path, monkeypatch):
     app = QApplication.instance() or QApplication([])
     first = Profile(
         "Current",
@@ -41,6 +41,10 @@ def library_window(tmp_path):
         id="second",
     )
     library = ProfileLibrary([first, second], first.id)
+    # This fixture exercises presentation of two tiers; proof verification has its own tests.
+    monkeypatch.setattr(
+        MainWindow, "is_pro_profile", lambda self, value: bool(value and value.id == second.id)
+    )
     store = Store(tmp_path)
     store.save_library(library)
     window = MainWindow(
@@ -96,7 +100,7 @@ def test_inactive_card_actions_preserve_current_connection(library_window, monke
     window.profile_list.setCurrentRow(1)
     assert window.connected and window.session_profile.id == first.id
     assert window.delete_button.isEnabled()
-    monkeypatch.setattr("PySide6.QtWidgets.QInputDialog.getText", lambda *a, **k: ("Renamed", True))
+    monkeypatch.setattr("nodera.modals.get_text", lambda *a, **k: ("Renamed", True))
     window.rename_profile_button.click()
     wait(window, app)
     assert window.card_profile().name == "Renamed"
@@ -113,6 +117,7 @@ def test_inactive_card_actions_preserve_current_connection(library_window, monke
     assert window.connected and window.session_profile.id == first.id
     window.core.apply_profile.assert_not_called()
     window.core.stop.assert_not_called()
+    monkeypatch.setattr("nodera.modals.confirm", lambda *a, **k: True)
     window.delete_button.click()
     wait(window, app)
     assert window.connected and window.profile.id == first.id

@@ -182,6 +182,7 @@ def test_ui_imports_many_switches_and_keeps_routes_without_showing_links(tmp_pat
     assert not any("secret" in field.text() for field in window.findChildren(QLineEdit))
     assert not hasattr(window, "url")
     assert store.load_library().active_id == first.id
+    monkeypatch.setattr("nodera.modals.confirm", lambda *a, **k: True)
     window.delete_profile()
     wait(window, app)
     assert window.profile.name == "B" and len(window.library.profiles) == 1

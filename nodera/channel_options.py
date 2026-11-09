@@ -3,7 +3,6 @@
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
-    QDialog,
     QHBoxLayout,
     QLayout,
     QListView,
@@ -18,8 +17,8 @@ from PySide6.QtWidgets import (
 )
 
 from nodera.channel_policy import PROTOCOL_LABELS, ChannelPolicy, channel_capabilities
-from nodera.chrome import ShellSurface, TitleBar
 from nodera.controls import ComboBox, NumberBox, Switch
+from nodera.modals import AppDialog
 from nodera.settings_ui import section, setting
 from nodera.widgets import label
 
@@ -47,44 +46,31 @@ class OptionPages(QWidget):
         self.updateGeometry()
 
 
-class ProOptionsDialog(QDialog):
+class ProOptionsDialog(AppDialog):
     def __init__(self, owner):
         super().__init__(owner)
+        self.fit_content = False
         self.owner = owner
-        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setObjectName("proOptions")
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
-        surface = ShellSurface()
-        surface.setFixedWidth(480)
-        shell = QVBoxLayout(surface)
-        shell.setContentsMargins(1, 1, 1, 1)
-        shell.setSpacing(0)
-        self.title_bar = TitleBar(self)
-        self.title_bar.minimize.hide()
+        self.layout().setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
+        self.body.parentWidget().setFixedWidth(440)
         self.setWindowTitle("Опции PRO")
-        shell.addWidget(self.title_bar)
-        body = QWidget()
-        body.setObjectName("settingsPage")
-        content = QVBoxLayout(body)
-        content.setContentsMargins(16, 4, 16, 16)
+        self.body.setObjectName("settingsPage")
+        content = QVBoxLayout(self.body)
+        content.setContentsMargins(12, 2, 12, 12)
         self.pages = OptionPages()
         content.addWidget(self.pages)
-        shell.addWidget(body)
-        root.addWidget(surface)
 
         self.options = {}
         self.overview = QWidget()
         overview = QVBoxLayout(self.overview)
         overview.setContentsMargins(0, 0, 0, 0)
-        overview.setSpacing(12)
+        overview.setSpacing(8)
         self.subscription_caption = label("Mihomo", "muted", True)
         overview.addWidget(self.subscription_caption)
         self.option_list = QVBoxLayout()
-        self.option_list.setSpacing(8)
+        self.option_list.setSpacing(6)
         overview.addLayout(self.option_list)
         close_overview = QPushButton("Закрыть")
         close_overview.clicked.connect(self.reject)
@@ -94,7 +80,7 @@ class ProOptionsDialog(QDialog):
         self.auto_routes = QWidget()
         layout = QVBoxLayout(self.auto_routes)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
+        layout.setSpacing(6)
         self.back_button = QPushButton("‹ Все опции")
         self.back_button.setObjectName("quietAction")
         self.back_button.clicked.connect(self.show_overview)
@@ -212,10 +198,10 @@ class ProOptionsDialog(QDialog):
         self.pages.addWidget(page)
         button = QPushButton()
         button.setObjectName("proOptionCard")
-        button.setFixedHeight(72)
+        button.setFixedHeight(52)
         button.setAccessibleName(title)
         row = QHBoxLayout(button)
-        row.setContentsMargins(14, 12, 14, 12)
+        row.setContentsMargins(10, 6, 10, 6)
         text = QVBoxLayout()
         text.setSpacing(4)
         text.addWidget(label(title, "profileName"))

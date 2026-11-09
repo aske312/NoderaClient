@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QColor, QFontDatabase
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
-    QMessageBox,
     QProgressBar,
     QPushButton,
     QTextBrowser,
@@ -33,8 +32,10 @@ from PySide6.QtWidgets import (
 
 from nodera.chrome import FramelessWindowMixin
 from nodera.install_service import InstallService
+from nodera.modals import AppDialog, QMessageBox
 from nodera.models import ClientError
 from nodera.theme import STYLE
+from nodera.theme import configure_style as configure_app_style
 from nodera.widgets import app_icon, label
 
 INSTALL_STYLE = """
@@ -56,10 +57,7 @@ QTextBrowser { background: #0d202a; border: 1px solid #28404b; border-radius: 10
 
 
 def configure_style(app):
-    if os.name == "nt":
-        for name in ("segoeui.ttf", "seguisb.ttf"):
-            QFontDatabase.addApplicationFont(str(Path(os.environ["WINDIR"]) / "Fonts" / name))
-    app.setStyle("Fusion")
+    configure_app_style(app)
     app.setStyleSheet(STYLE + INSTALL_STYLE)
 
 
@@ -101,14 +99,12 @@ def license_html(text):
     )
 
 
-class OptionsDialog(QDialog):
+class OptionsDialog(AppDialog):
     def __init__(self, folder, startup, desktop, locked, parent):
         super().__init__(parent)
         self.setWindowTitle("Параметры Nodera")
         self.setMinimumWidth(440)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 20, 22, 20)
-        layout.setSpacing(15)
+        layout = self.content_layout()
         form = QFormLayout()
         row = QHBoxLayout()
         self.folder = QLineEdit(str(folder))
@@ -129,6 +125,7 @@ class OptionsDialog(QDialog):
         layout.addWidget(self.startup)
         layout.addWidget(self.desktop)
         self.error = label("", "muted", True)
+        self.error.hide()
         layout.addWidget(self.error)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -153,6 +150,7 @@ class OptionsDialog(QDialog):
             self.error.setText(
                 "Укажите полный путь к папке приложения, затем нажмите «Подтвердить»."
             )
+            self.error.show()
             return
         super().accept()
 
@@ -276,11 +274,11 @@ class InstallerWindow(FramelessWindowMixin, QMainWindow):
             self.primary.setText("Принять и установить")
 
     def show_terms(self):
-        dialog = QDialog(self)
+        dialog = AppDialog(self)
+        dialog.fit_content = False
         dialog.setWindowTitle("Условия использования Nodera")
-        dialog.resize(680, 490)
-        layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(18, 18, 18, 18)
+        dialog.resize(640, 440)
+        layout = dialog.content_layout()
         reader = QTextBrowser()
         reader.setHtml(license_html(self.license_text))
         layout.addWidget(reader)

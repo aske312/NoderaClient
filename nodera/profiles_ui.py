@@ -21,12 +21,19 @@ from PySide6.QtWidgets import (
 
 from nodera.dialogs import SubscriptionDialog
 from nodera.models import ClientError, ProfileLibrary, visible_proxies
-from nodera.profile_view import format_bytes, is_pro_subscription
-from nodera.subscription import fetch_profile
+from nodera.profile_view import (
+    format_bytes,
+    is_pro_subscription,
+    subscription_notice,
+)
+from nodera.subscription import SubscriptionUnavailable, fetch_profile
 from nodera.widgets import AddProfileButton, label
 
 
 class ProfilesMixin:
+    def is_pro_profile(self, profile):
+        return is_pro_subscription(profile)
+
     def channel_service(self, profile=None):
         from nodera import channel_selection
 
@@ -57,9 +64,33 @@ class ProfilesMixin:
         self.power.setSubscriptionStatus(state)
         self.subscription_status.setText(text)
         self.subscription_status.setToolTip(text)
-        self.subscription_status.setVisible(bool(text))
+        self.refresh_dashboard_feedback()
         if state in {"success", "error"}:
             self.subscription_feedback_timer.start()
+
+    def refresh_subscription_notices(self):
+        for widget, profile, short in (
+            (self.dashboard_access_notice, self.profile, True),
+            (self.profile_access_notice, self.card_profile(), False),
+        ):
+            notice = subscription_notice(profile, short=short)
+            widget.setText(notice)
+            widget.setToolTip(subscription_notice(profile))
+            if not short:
+                widget.setVisible(bool(notice))
+        self.refresh_dashboard_feedback()
+
+    def refresh_dashboard_feedback(self):
+        state = getattr(self, "subscription_state", None)
+        if self.dashboard_access_notice.text() and state != "loading":
+            current = self.dashboard_access_notice
+        elif self.subscription_status.text():
+            current = self.subscription_status
+        else:
+            current = self.hint
+        self.dashboard_feedback.layout().setCurrentWidget(current)
+        for widget in (self.hint, self.subscription_status, self.dashboard_access_notice):
+            widget.setVisible(widget is current)
 
     def display_profile(self):
         session = self.session_profile
@@ -154,6 +185,9 @@ class ProfilesMixin:
         detail.addLayout(metrics)
         self.subscription_info = label("Нет подписок", "muted", True)
         detail.addWidget(self.subscription_info)
+        self.profile_access_notice = label("", "subscriptionWarning", True)
+        self.profile_access_notice.hide()
+        detail.addWidget(self.profile_access_notice)
         row = QHBoxLayout()
         row.setSpacing(6)
         self.profile_activate_button = QPushButton("Сделать активной")
@@ -245,7 +279,7 @@ class ProfilesMixin:
             )
             text = (
                 f"{profile.name}\n"
-                + ("PRO · " if is_pro_subscription(profile) else "")
+                + ("PRO · " if self.is_pro_profile(profile) else "")
                 + f"{count} {noun}"
             )
             if profile.id == self.library.active_id:
@@ -264,7 +298,7 @@ class ProfilesMixin:
         for selector in selectors:
             selector.fit_text()
         self.library_count.setText(f"Сохранено подписок: {len(self.library.profiles)}")
-        pro = is_pro_subscription(self.profile)
+        pro = self.is_pro_profile(self.profile)
         for badge in (self.home_pro_badge, self.connections_pro_badge):
             badge.setVisible(pro)
             badge.setToolTip("PRO")
@@ -301,7 +335,8 @@ class ProfilesMixin:
         current = bool(profile and profile.id == self.library.active_id)
         self.profile_summary_title.setText(profile.name if profile else "Нет подписки")
         self.profile_current_badge.setVisible(current)
-        self.profile_pro_badge.setVisible(is_pro_subscription(profile))
+        self.profile_pro_badge.setVisible(self.is_pro_profile(profile))
+        self.refresh_subscription_notices()
         if profile:
             usage = profile.usage
             self.profile_summary_nodes.setText(str(len(visible_proxies(profile.config))))
@@ -354,7 +389,7 @@ class ProfilesMixin:
         self.delete_button.setEnabled(
             bool(idle and profile and not pending and not (current and self.connected))
         )
-        self.profile_options.setVisible(is_pro_subscription(profile))
+        self.profile_options.setVisible(self.is_pro_profile(profile))
         own_pending = (
             not self.pending_channel_result
             or profile
@@ -471,9 +506,17 @@ class ProfilesMixin:
         def load():
             from urllib.parse import urlsplit
 
-            profile = self.fetch_subscription(
-                url, name.strip() or urlsplit(url).hostname or "Подписка"
-            )
+            try:
+                profile = self.fetch_subscription(
+                    url, name.strip() or urlsplit(url).hostname or "Подписка"
+                )
+            except SubscriptionUnavailable as exc:
+                if previous is None:
+                    raise
+                unavailable = replace(previous, access_state=exc.state)
+                updated = library.upsert(unavailable, activate=False)
+                self.store.save_library(updated)
+                return updated, unavailable, None, self.settings, exc
             if previous:
                 profile = replace(
                     profile,
@@ -520,14 +563,18 @@ class ProfilesMixin:
                             "Сеанс сохранён, но не удалось откатить подписку на диске."
                         ) from exc
                     raise
-            return updated, profile, groups, settings
+            return updated, profile, groups, settings, None
 
         def loaded(result):
+            self.library, updated, groups, settings, rejection = result
+            self.profile = self.library.active
+            if rejection:
+                self.refresh_profile()
+                failed(str(rejection))
+                return
             self.show_subscription_state(
                 "success", "Подписка обновлена" if previous else "Подписка добавлена"
             )
-            self.library, updated, groups, settings = result
-            self.profile = self.library.active
             if previous is None:
                 self.preview_profile_id = updated.id
             self.apply_subscription_settings(settings)
@@ -575,7 +622,7 @@ class ProfilesMixin:
             return
         idle = self.task is None and not self.closing
         target = self.channel_target_profile()
-        pro = is_pro_subscription(target)
+        pro = self.is_pro_profile(target)
         pending = self.pending_channel_result
         result = pending or self.last_channel_result
         if result and (not target or result.profile.id != target.id):
@@ -583,7 +630,7 @@ class ProfilesMixin:
         own = bool(result and target and result.profile.id == target.id)
         dialog = self.channel_dialog
         self.refresh_card_controls()
-        self.dashboard_options_button.setVisible(is_pro_subscription(self.profile))
+        self.dashboard_options_button.setVisible(self.is_pro_profile(self.profile))
         self.dashboard_options_button.setEnabled(
             bool(idle and (not pending or self.profile and pending.profile.id == self.profile.id))
         )
@@ -612,7 +659,7 @@ class ProfilesMixin:
 
     def channel_options(self, profile_id=None):
         target = next((p for p in self.library.profiles if p.id == profile_id), self.profile)
-        if self.closing or not is_pro_subscription(target):
+        if self.closing or not self.is_pro_profile(target):
             return
         if self.pending_channel_result and self.pending_channel_result.profile.id != target.id:
             return
@@ -930,14 +977,12 @@ class ProfilesMixin:
         self.run_task(rollback, rolled_back, failed)
 
     def rename_profile(self):
-        from PySide6.QtWidgets import QInputDialog
+        from nodera.modals import get_text
 
         target = self.card_profile()
         if self.task or not target or self.closing:
             return
-        name, accepted = QInputDialog.getText(
-            self, "Название подписки", "Название", text=target.name
-        )
+        name, accepted = get_text(self, "Название подписки", "Название", text=target.name)
         if not accepted or not name.strip():
             return
         profile = replace(target, name=name.strip()[:80])
@@ -958,6 +1003,16 @@ class ProfilesMixin:
             or not target
             or self.connected
             and target.id == self.library.active_id
+        ):
+            return
+        from nodera.modals import confirm
+
+        if not confirm(
+            self,
+            "Удалить подписку?",
+            f"«{target.name}» и её сохранённые маршруты будут удалены из приложения. На сервере подписка останется.",
+            "Удалить",
+            destructive=True,
         ):
             return
         profiles = [item for item in self.library.profiles if item.id != target.id]

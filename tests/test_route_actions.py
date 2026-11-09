@@ -1,7 +1,7 @@
 import os
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 
 import httpx
 import pytest
@@ -14,6 +14,7 @@ from nodera.models import Profile, Settings
 from nodera.settings_ui import detect_point
 from nodera.storage import Store
 from nodera.ui import MainWindow
+from tests.loopback import ThreadingHTTPServer
 
 
 def test_automatic_client_point_saved_once_and_network_rows_follow_mode(tmp_path, monkeypatch):

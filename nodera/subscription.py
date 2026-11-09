@@ -1,3 +1,4 @@
+import json
 import math
 import time
 from datetime import date, datetime, timezone
@@ -14,6 +15,48 @@ from nodera.models import ClientError, Profile
 from nodera.pro_provenance import new_nonce, verification_record, verify_proof
 
 MAX_CONFIG_BYTES = 4 * 1024 * 1024
+
+ACCESS_MESSAGES = {
+    "missing": "Подписка удалена или ссылка недействительна. Получите новую ссылку у поставщика.",
+    "expired": "Срок подписки истёк. Продлите её и нажмите «Обновить».",
+    "exhausted": "Лимит трафика подписки исчерпан. Пополните его и нажмите «Обновить».",
+    "denied": "Доступ к подписке ограничен. Проверьте срок, лимит и привязку устройства у поставщика.",
+}
+
+
+class SubscriptionUnavailable(ClientError):
+    def __init__(self, state):
+        self.state = state
+        super().__init__(ACCESS_MESSAGES[state])
+
+
+def subscription_rejection(response):
+    if response.status_code in {404, 410}:
+        return SubscriptionUnavailable("missing")
+    if response.status_code != 403:
+        return None
+    # Only recognize known reasons; never display an arbitrary server error body.
+    body = bytearray()
+    for chunk in response.iter_bytes(chunk_size=1024):
+        body.extend(chunk)
+        if len(body) > 4096:
+            return SubscriptionUnavailable("denied")
+    try:
+        data = json.loads(body)
+        detail = data.get("detail") if isinstance(data, dict) else None
+    except (ValueError, UnicodeError):
+        detail = None
+    state = (
+        {
+            "Срок подписки истёк": "expired",
+            "Subscription expired": "expired",
+            "Объём трафика подписки исчерпан": "exhausted",
+            "Subscription traffic quota exhausted": "exhausted",
+        }.get(detail, "denied")
+        if isinstance(detail, str)
+        else "denied"
+    )
+    return SubscriptionUnavailable(state)
 
 
 def normalized_yaml(value, active=None, budget=None, depth=0):
@@ -170,14 +213,9 @@ def fetch_profile(
                 emit(
                     f"event=subscription_response status={response.status_code} elapsed_ms={int((time.monotonic() - started) * 1000)}"
                 )
-                if response.status_code == 403:
-                    raise ClientError(
-                        "Подписка недоступна: проверьте срок, лимит и привязку устройства у поставщика подписки."
-                    )
-                if response.status_code == 404:
-                    raise ClientError(
-                        "Подписка не найдена. Скопируйте действующую ссылку у поставщика подписки."
-                    )
+                rejection = subscription_rejection(response)
+                if rejection:
+                    raise rejection
                 if response.is_redirect:
                     raise ClientError(
                         "Подписка перенаправляет запрос. Используйте конечный HTTPS-адрес."

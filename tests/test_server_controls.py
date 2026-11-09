@@ -240,6 +240,48 @@ def test_network_tag_tracks_actual_probe_while_navigation_remains_usable(tmp_pat
     window.close()
 
 
+def test_home_tag_tracks_selected_route_and_keeps_failure_history_separate(tmp_path):
+    app, window = make_window(tmp_path)
+    try:
+        window.connected = True
+        window.network_state = "error"  # The general probe may use another routing rule.
+        window.profile.config["rules"] = ["MATCH,DIRECT"]
+        window.network_results = [(time.time(), False)]
+        window.groups_data = [
+            {"name": "automatic", "current": "route-0", "active": ["route-0", "route-1"]},
+            {"name": "other", "current": "route-2", "active": ["route-2"]},
+        ]
+        now = time.time()
+        values = {
+            f"route-{i}": {"value": value, "checked_at": now}
+            for i, value in enumerate((70, 1500, 0, 80))
+        }
+        window.delay_results = {(window.profile.id, name): value for name, value in values.items()}
+        window.record_route_results(
+            window.profile.id, {"route-0": {"value": 0, "checked_at": now - 3}}
+        )
+        window.record_route_results(window.profile.id, values)
+        for route, state in (
+            ("route-0", "unstable"),
+            ("route-1", "slow"),
+            ("route-2", "error"),
+            ("route-3", "ok"),
+        ):
+            window.groups_data[0]["current"] = route
+            window.update_network_tag()
+            assert window.network_tag.property("state") == state
+            assert route in window.network_tag.toolTip()
+            text_width = window.network_tag.fontMetrics().horizontalAdvance(
+                window.network_tag.text()
+            )
+            assert text_width + 16 <= window.network_tag.width() <= max(88, text_width + 32)
+    finally:
+        window.connected = False
+        window.quit_requested = True
+        window.close()
+        app.processEvents()
+
+
 def test_map_names_use_city_for_each_role_and_country_when_city_is_unknown():
     for role in ("client", "relay", "cdn", "server"):
         location = dict(role=role, city="  Frankfurt  ", name="Germany", code="DE")

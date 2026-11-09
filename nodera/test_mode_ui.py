@@ -1,14 +1,11 @@
 """Scenario controls installed only by the test-build window."""
 
-import time
-from dataclasses import replace
-
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QHBoxLayout, QPlainTextEdit, QPushButton, QVBoxLayout
 
 from nodera.controls import ComboBox, NumberBox, Switch
 from nodera.settings_ui import section, setting
-from nodera.test_scenarios import PRESETS, STATES, SUBSCRIPTIONS
+from nodera.test_scenarios import DEMO_PROFILES, PRESETS, STATES, SUBSCRIPTIONS
 from nodera.widgets import label
 
 
@@ -35,7 +32,9 @@ def build_test_mode(window):
         box.setFixedWidth(185)
         return box
 
-    window.test_profile = selector((("Демо PRO", "demo-pro"), ("Демо Стандарт", "demo-standard")))
+    window.test_profile = selector(
+        (definition["name"], identity) for identity, definition in DEMO_PROFILES.items()
+    )
     columns = QHBoxLayout()
     left, right = QVBoxLayout(), QVBoxLayout()
     columns.addLayout(left, 1)
@@ -247,15 +246,7 @@ def apply_test_scenario(window, identity):
     if profile is None:
         return
     fixture = next(p for p in demo_library().profiles if p.id == identity)
-    usage = dict(fixture.usage)
-    usage["expire"] = (
-        int(time.time()) - 60
-        if value["subscription"] == "expired"
-        else int(time.time()) + 90 * 86400
-    )
-    if value["subscription"] == "exhausted":
-        usage["download"] = usage["total"]
-    updated = replace(profile, usage=usage)
+    updated = window.scenarios.apply_profile(profile)
     window.library = window.library.upsert(updated, activate=False)
     window.store.save_library(window.library)
     if window.profile and window.profile.id == identity:

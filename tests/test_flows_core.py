@@ -2,7 +2,7 @@ import ctypes
 import os
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 import httpx
@@ -12,6 +12,7 @@ from nodera.bundled_core import bundled_location
 from nodera.core import Core
 from nodera.flow_monitor import FlowMonitor
 from nodera.models import Profile, Settings
+from tests.loopback import ThreadingHTTPServer
 
 
 @pytest.mark.skipif(os.name != "nt" or not bundled_location().is_file(), reason="Windows core")

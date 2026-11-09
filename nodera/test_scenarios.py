@@ -1,14 +1,28 @@
-"""Persistent, deterministic events scoped to the two fictional subscriptions."""
+"""Persistent, deterministic events scoped to fictional subscriptions."""
 
 import copy
 import json
 import time
+from dataclasses import replace
 from threading import RLock
 
 from nodera.models import ClientError
 from nodera.storage import atomic_write
+from nodera.subscription import SubscriptionUnavailable
 
-DEMO_IDS = ("demo-pro", "demo-standard")
+DEMO_PROFILES = {
+    "demo-pro": {"name": "Демо PRO", "pro": True},
+    "demo-standard": {"name": "Демо Стандарт", "pro": False},
+    "demo-outage": {"name": "Демо · Отказ всех", "pro": False, "preset": "outage"},
+    "demo-slow": {"name": "Демо · Медленно", "pro": False, "preset": "slow"},
+    "demo-unstable": {"name": "Демо · Обрывы", "pro": True, "unstable": True},
+    "demo-failover": {"name": "Демо · Отказ узла", "pro": True, "preset": "primary-down"},
+    "demo-expired": {"name": "Демо · Срок истёк", "pro": True, "subscription": "expired"},
+    "demo-exhausted": {"name": "Демо · Лимит 100%", "pro": False, "subscription": "exhausted"},
+    "demo-removed": {"name": "Демо · Удалена", "pro": True, "subscription": "removed"},
+    "demo-update-error": {"name": "Демо · Сбой API", "pro": False, "subscription": "unavailable"},
+}
+DEMO_IDS = tuple(DEMO_PROFILES)
 PRESETS = {
     "mixed": "Смешанные каналы",
     "healthy": "Все каналы работают",
@@ -28,7 +42,26 @@ SUBSCRIPTIONS = {
     "expired": "Истёк срок",
     "exhausted": "Исчерпан трафик",
     "unavailable": "Ошибка обновления",
+    "removed": "Подписка удалена",
 }
+
+
+def subscription_profile(profile, state):
+    usage = {
+        "upload": 128 * 1024**2,
+        "download": 3 * 1024**3,
+        "total": 100 * 1024**3,
+        "expire": int(time.time()) + (-86400 if state == "expired" else 90 * 86400),
+    }
+    if state == "exhausted":
+        usage["download"] = usage["total"]
+    return replace(
+        profile,
+        usage=usage,
+        access_state={"expired": "expired", "exhausted": "exhausted", "removed": "missing"}.get(
+            state, ""
+        ),
+    )
 
 
 class TestScenarios:
@@ -38,7 +71,7 @@ class TestScenarios:
         self.path = root / "test-scenarios.json"
         self.clock = clock
         self.lock = RLock()
-        self.profiles = {identity: self.defaults() for identity in DEMO_IDS}
+        self.profiles = {identity: self.defaults(identity) for identity in DEMO_IDS}
         self.events = []
         self.due = {}
         self.phases = {}
@@ -67,18 +100,23 @@ class TestScenarios:
                         and type(value.get("step")) is int
                         and value["step"] >= 0
                     ):
-                        self.profiles[identity] = {**self.defaults(), **value}
+                        self.profiles[identity] = {**self.defaults(identity), **value}
             except (ValueError, OSError, AttributeError, TypeError):
                 pass
 
     @staticmethod
-    def defaults():
+    def defaults(identity=None):
+        definition = DEMO_PROFILES.get(identity, {})
         return {
-            "preset": "mixed",
-            "subscription": "normal",
-            "nodes": {},
+            "preset": definition.get(
+                "preset", "mixed" if identity in (None, "demo-pro", "demo-standard") else "healthy"
+            ),
+            "subscription": definition.get("subscription", "normal"),
+            "nodes": {"DE · Frankfurt": {"state": "unstable", "latency": 70, "udp": True}}
+            if definition.get("unstable")
+            else {},
             "auto": False,
-            "interval": 15,
+            "interval": 3 if definition.get("unstable") else 15,
             "step": 0,
         }
 
@@ -164,7 +202,7 @@ class TestScenarios:
         return changed
 
     def reset(self, identity):
-        self.save(identity, "Сценарии сброшены", **self.defaults())
+        self.save(identity, "Сценарии сброшены", **self.defaults(identity))
         self.due.pop(identity, None)
         self.phases.pop(identity, None)
 
@@ -203,11 +241,10 @@ class TestScenarios:
 
     def check_subscription(self, identity, *, updating=False):
         state = self.settings(identity)["subscription"]
-        messages = {
-            "expired": "Демо · срок подписки истёк.",
-            "exhausted": "Демо · лимит трафика исчерпан.",
-        }
         if updating and state == "unavailable":
             raise ClientError("Демо · сервер обновления недоступен.")
-        if state in messages:
-            raise ClientError(messages[state])
+        if state in {"expired", "exhausted", "removed"}:
+            raise SubscriptionUnavailable("missing" if state == "removed" else state)
+
+    def apply_profile(self, profile):
+        return subscription_profile(profile, self.settings(profile.id)["subscription"])

@@ -1,6 +1,7 @@
+param([string]$PythonExecutable)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$pythonPath = Join-Path $projectRoot '.venv\Scripts\pythonw.exe'
+$pythonPath = if ($PythonExecutable) { Join-Path (Split-Path -Parent (Resolve-Path -LiteralPath $PythonExecutable).Path) 'pythonw.exe' } else { Join-Path $projectRoot '.venv\Scripts\pythonw.exe' }
 $launcher = Join-Path $PSScriptRoot 'launch_test.py'
 if (-not (Test-Path -LiteralPath $pythonPath)) { throw 'Prepare .venv first.' }
 $shell = New-Object -ComObject WScript.Shell

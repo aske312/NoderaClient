@@ -37,9 +37,10 @@ def wait(app, window):
 
 
 @pytest.mark.parametrize(
-    "missing", [None, "profile", "total", "expire", "strategy", "unlimited", "permanent", "unknown"]
+    "missing",
+    [None, "profile", "all", "total", "expire", "strategy", "unlimited", "permanent", "unknown"],
 )
-def test_subscription_strip_requires_all_three_finite_server_values(tmp_path, missing):
+def test_subscription_metrics_share_one_layout_and_hide_without_server_data(tmp_path, missing):
     profile = Profile(
         "Personal",
         "",
@@ -49,6 +50,8 @@ def test_subscription_strip_requires_all_three_finite_server_values(tmp_path, mi
     )
     if missing in {"total", "expire"}:
         profile.usage.pop(missing)
+    elif missing == "all":
+        profile.usage.clear()
     elif missing == "strategy":
         profile.config.pop("proxy-groups")
     elif missing == "unknown":
@@ -57,7 +60,15 @@ def test_subscription_strip_requires_all_three_finite_server_values(tmp_path, mi
         profile.usage["total" if missing == "unlimited" else "expire"] = 0
     app, window = make_window(tmp_path, None if missing == "profile" else profile)
     try:
-        assert window.quota_panel.isVisible() == (missing is None)
+        visible = missing not in {"profile", "all"}
+        assert window.quota_panel.isVisible() == visible
+        assert window.dashboard_plan_panel.isVisible() == visible
+        if missing in {"total", "expire"}:
+            assert window.quota_labels[0 if missing == "total" else 1][0].text() == "—"
+        elif missing == "unlimited":
+            assert window.quota_labels[0][0].text() == "Без лимита"
+        elif missing == "permanent":
+            assert window.quota_labels[1][0].text() == "Без срока"
         if missing is None:
             # Exhausted/expired finite plans remain meaningful and visible.
             profile.usage = {"total": 10, "download": 10, "expire": 1}

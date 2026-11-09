@@ -5,6 +5,58 @@ import pytest
 from nodera.models import ClientError
 
 
+@pytest.fixture(scope="session", autouse=True)
+def application_fonts():
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from nodera.theme import prepare_fonts
+
+    app = QApplication.instance() or QApplication([])
+    prepare_fonts(app)
+    yield app
+
+
+@pytest.fixture(autouse=True)
+def close_test_windows(application_fonts, monkeypatch):
+    """Dispose each test's Qt windows after their normal asynchronous shutdown."""
+    yield
+    import shiboken6
+    from PySide6.QtCore import QCoreApplication, QElapsedTimer, QEvent
+    from PySide6.QtTest import QTest
+
+    roots = [w for w in application_fonts.topLevelWidgets() if w.parent() is None]
+    for window in roots:
+        if getattr(window, "shutdown_emitted", False):
+            continue
+        if hasattr(window, "exit_app"):
+            type(window).exit_app(window)
+        else:
+            window.close()
+    deadline = QElapsedTimer()
+    deadline.start()
+    while any(
+        shiboken6.isValid(w)
+        and (
+            getattr(w, "task", None)
+            or getattr(w, "inspections", None)
+            or getattr(w, "poll_task", None)
+            or getattr(w, "geo_task", None)
+            or getattr(w, "worker", None)
+        )
+        for w in roots
+    ):
+        assert deadline.elapsed() < 10000, "Qt window did not complete its shutdown"
+        application_fonts.processEvents()
+        QTest.qWait(10)
+    for window in roots:
+        if shiboken6.isValid(window):
+            window.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
 def pytest_configure(config):
     # pytest creates basetemp itself, but its parent may not exist on a clean checkout.
     if config.option.basetemp:

@@ -25,7 +25,6 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMenu,
-    QMessageBox,
     QScrollArea,
     QStackedWidget,
     QSystemTrayIcon,
@@ -43,6 +42,7 @@ from nodera.flows_ui import FlowsMixin
 from nodera.geolocation import GeoClient
 from nodera.journal import Journal
 from nodera.locations import country
+from nodera.modals import QMessageBox
 from nodera.models import ClientError, visible_proxies
 from nodera.navigation import NavigationDock
 from nodera.presentation import PresentationMixin
@@ -179,6 +179,7 @@ class MainWindow(
         self.log_timer.start()
         self.subscription_timer = QTimer(self)
         self.subscription_timer.setInterval(60000)
+        self.subscription_timer.timeout.connect(self.refresh_subscription_notices)
         self.subscription_timer.timeout.connect(self.auto_update_profile)
         self.subscription_timer.start()
         if getattr(sys, "frozen", False):
@@ -192,6 +193,7 @@ class MainWindow(
         self.client_location_timer.timeout.connect(self.auto_client_location)
         self.client_location_timer.start(1500)
         self.tray = QSystemTrayIcon(self.windowIcon(), self)
+        self.tray.messageClicked.connect(self.show_update_offer)
         self.tray.setToolTip("Nodera · отключено")
         menu = QMenu(self)
         show = QAction("Открыть Nodera", self)
@@ -467,6 +469,7 @@ class MainWindow(
         self.render_nodes()
         self.node_list.verticalScrollBar().setValue(scroll)
         self.update_route_pill()
+        self.update_network_tag()
 
     def current_group(self):
         name = self.group_combo.currentData()
@@ -879,27 +882,99 @@ class MainWindow(
     def update_network_tag(self):
         if not hasattr(self, "network_tag"):
             return
-        state = self.network_state if self.connected else "off"
+        import time
+
+        from nodera.network_quality import current_route, network_quality
+
+        route = current_route(self.display_profile(), self.groups_data)
+        profile_id = self.profile.id if self.profile else ""
+        history = (
+            getattr(self, "route_results", {}).get((profile_id, route), [])
+            if route
+            else getattr(self, "network_results", [])
+        )
+        state, explanation = network_quality(
+            self.connected,
+            self.network_state,
+            route,
+            self.delay_results,
+            profile_id,
+            history,
+            time.time(),
+        )
+        if self.connected and self.api_failures >= 3:
+            state, explanation = "unverified", "Нет свежих данных от ядра."
         text = {
             "off": "Отключено",
-            "unverified": "Включено",
-            "checking": "Проверяем сеть…",
+            "unverified": "Не проверен",
+            "checking": "Проверка…",
             "ok": "Включено",
-            "error": "Проблемы сети",
+            "error": "Нет ответа" if route else "Проблемы сети",
+            "slow": "С задержкой",
+            "unstable": "Нестабильно",
         }[state]
         self.network_tag.setText(text)
         self.network_tag.setProperty("state", state)
         self.network_tag.style().unpolish(self.network_tag)
         self.network_tag.style().polish(self.network_tag)
+        self.network_tag.setFixedWidth(
+            max(72, self.network_tag.fontMetrics().horizontalAdvance(text) + 20)
+        )
         self.network_tag.setEnabled(self.connected and state != "checking" and not self.closing)
+        checked_at = (
+            self.delay_results.get((profile_id, route), {}).get("checked_at", 0)
+            if route
+            else self.network_checked_wall
+        )
         stamp = (
-            datetime.fromtimestamp(self.network_checked_wall).strftime("%H:%M:%S")
-            if self.network_checked_wall
+            datetime.fromtimestamp(checked_at).strftime("%H:%M:%S")
+            if checked_at
             else "ещё не выполнена"
         )
         self.network_tag.setToolTip(
-            "HTTPS через Nodera · Проверка: " + stamp + ". Нажмите для повторной проверки."
+            explanation
+            + (f" Маршрут: {route}. Проверка: " if route else " HTTPS через Nodera · Проверка: ")
+            + stamp
+            + ". Нажмите для повторной проверки."
         )
+        if self.connected:
+            self.hint.setText(explanation)
+        else:
+            self.hint.setText(
+                "Нажмите кнопку для подключения."
+                if self.profile
+                else "Добавьте подписку для подключения."
+            )
+
+    def record_route_results(self, profile_id, values):
+        import time
+
+        now = time.time()
+        histories = getattr(self, "route_results", {})
+        self.route_results = {
+            key: [(stamp, ok) for stamp, ok in history if now - stamp <= 60]
+            for key, history in histories.items()
+        }
+        for name, sample in values.items():
+            history = self.route_results.setdefault((profile_id, name), [])
+            stamp = sample["checked_at"]
+            if not history or history[-1][0] < stamp:
+                history.append((stamp, sample["value"] > 0))
+
+    def check_route_status(self):
+        self.test_group()
+        self.check_connection()
+
+    def record_network_result(self, success):
+        import time
+
+        now = time.time()
+        self.network_results = [
+            (stamp, result)
+            for stamp, result in getattr(self, "network_results", [])
+            if now - stamp <= 60
+        ]
+        self.network_results.append((now, success))
 
     def check_connection(self):
         if not self.connected or self.closing or "connectivity" in self.inspections:
@@ -913,25 +988,28 @@ class MainWindow(
         self.tray.setToolTip("Nodera · " + self.state.text())
 
         def checked(_):
+            self.record_network_result(True)
             self.network_checked_wall = time.time()
             self.network_state = "ok"
             self.network_error = ""
             self.state.setText(self.connection_state_text())
             self.navigation_status.setText("HTTPS проверен")
             self.tray.setToolTip("Nodera · " + self.state.text())
-            self.hint.setText(self.connection_hint)
+            self.update_network_tag()
             self.log(
                 "HTTPS-запрос через локальный прокси прошёл. Перехват TUN проверяется отдельно."
             )
 
         def failed(message):
+            self.record_network_result(False)
             self.network_checked_wall = time.time()
             self.network_state = "error"
             self.network_error = message
             self.state.setText(self.connection_state_text())
             self.navigation_status.setText("Проверка не прошла")
             self.tray.setToolTip("Nodera · " + self.state.text())
-            self.hint.setText(message)
+            self.update_network_tag()
+            self.hint.setToolTip(message)
             self.log(message, "warning")
             self.recover_routes()
             self.test_group()
@@ -992,6 +1070,8 @@ class MainWindow(
         self.network_state = "unverified"
         self.network_error = ""
         self.network_checked_wall = 0.0
+        self.network_results = []
+        self.route_results = {}
         self.state.setText(self.connection_state_text())
         self.hint.setText(
             ""
@@ -1048,7 +1128,8 @@ class MainWindow(
 
     def connection_failed(self, message):
         self.set_disconnected()
-        self.hint.setText(message)
+        self.hint.setText("Нет подключения. Обновите подписку или проверьте сеть.")
+        self.hint.setToolTip(message)
         self.error(message)
 
     def poll(self):
@@ -1100,6 +1181,7 @@ class MainWindow(
             for value in self.stat_rates:
                 value.setText("—")
             self.hint.setText(message)
+            self.update_network_tag()
 
         def snapshot():
             try:

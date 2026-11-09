@@ -100,6 +100,9 @@ def build(root=ROOT, *, progress=True):
         window.update()
     log = root / "artifacts/test-launcher/build.log"
     log.parent.mkdir(parents=True, exist_ok=True)
+    build_python = Path(sys.executable)
+    if build_python.name.lower() == "pythonw.exe":
+        build_python = build_python.with_name("python.exe")
     try:
         with log.open("w", encoding="utf-8") as output:
             process = subprocess.Popen(
@@ -110,6 +113,8 @@ def build(root=ROOT, *, progress=True):
                     "Bypass",
                     "-File",
                     str(root / "scripts/build-test.ps1"),
+                    "-PythonExecutable",
+                    str(build_python),
                 ],
                 cwd=root,
                 stdout=output,

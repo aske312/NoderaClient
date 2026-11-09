@@ -41,7 +41,7 @@ from nodera.controls import ComboBox as QComboBox
 from nodera.controls import SubscriptionSelector
 from nodera.delay_probe import probe_delays
 from nodera.device_info import windows_identity
-from nodera.diagnostics import preflight
+from nodera.diagnostics import ipv6_route_check, preflight
 from nodera.geolocation import endpoint_rows
 from nodera.journal import compact_entries, format_entry, profile_secrets, useful_event
 from nodera.locations import country
@@ -156,6 +156,7 @@ class WorkbenchMixin:
 
     def build_application(self):
         layout = self.page("О программе")
+        self.application_page = self.stack.widget(self.stack.count() - 1)
         panel = QWidget()
         panel.setObjectName("applicationCard")
         panel.setMaximumWidth(780)
@@ -291,8 +292,8 @@ class WorkbenchMixin:
         if self.task or {"app-update", "app-download"}.intersection(self.inspections):
             self.schedule_app_update_check(60000)
             return
-        self.available_release = None
-        self.downloaded_update = None
+        previous_release = self.available_release
+        previous_download = self.downloaded_update
         self.app_update_install.setText("Загрузить обновление")
         self.app_update_install.hide()
         self.app_update_check.show()
@@ -307,6 +308,10 @@ class WorkbenchMixin:
             self.app_update_check.setVisible(release is None)
             self.schedule_app_update_check(6 * 60 * 60 * 1000)
             self.available_release = release
+            self.downloaded_update = previous_download if release == previous_release else None
+            self.app_update_install.setText(
+                "Установить обновление" if self.downloaded_update else "Загрузить обновление"
+            )
             self.app_update_check.setEnabled(True)
             self.app_update_install.setEnabled(True)
             self.app_update_install.setVisible(release is not None)
@@ -315,12 +320,15 @@ class WorkbenchMixin:
                 if release
                 else f"Установлена актуальная версия {__version__}"
             )
+            if release:
+                self.notify_app_update(release)
 
         def failed(message):
             self.app_update_progress.hide()
             self.schedule_app_update_check(30 * 60 * 1000)
             self.app_update_check.setEnabled(True)
             self.app_update_install.setEnabled(self.available_release is not None)
+            self.app_update_install.setVisible(self.available_release is not None)
             self.app_update_status.setText(message)
 
         self.start_inspection(
@@ -330,6 +338,52 @@ class WorkbenchMixin:
             failed,
             session_bound=False,
         )
+
+    def notify_app_update(self, release):
+        from PySide6.QtWidgets import QSystemTrayIcon
+
+        if release.version == getattr(self, "notified_update_version", None):
+            return
+        self.notified_update_version = release.version
+        if self.tray.isVisible() and QSystemTrayIcon.supportsMessages():
+            self.tray.showMessage(
+                "Обновление Nodera",
+                f"Доступна версия {release.version}. Нажмите, чтобы обновиться.",
+                QSystemTrayIcon.MessageIcon.Information,
+                10000,
+            )
+        if self.isVisible():
+            self.show_update_offer()
+
+    def show_update_offer(self):
+        from nodera.modals import MessageDialog
+
+        if self.closing or not self.available_release:
+            return
+        existing = getattr(self, "update_offer", None)
+        if existing is not None and existing.isVisible():
+            existing.raise_()
+            existing.activateWindow()
+            return
+        if QApplication.activeModalWidget() is not None:
+            QTimer.singleShot(3000, self.show_update_offer)
+            return
+        self.reveal()
+        dialog = MessageDialog(
+            self,
+            "Доступно обновление",
+            f"Nodera {self.available_release.version}\nУстановлена версия {__version__}.\nПодписки и настройки сохранятся.",
+            "Установить" if self.downloaded_update else "Загрузить",
+            cancel=True,
+        )
+        dialog.cancel_button.setText("Позже")
+        dialog.accepted.connect(self.accept_update_offer)
+        self.update_offer = dialog
+        dialog.open()
+
+    def accept_update_offer(self):
+        self.navigate(self.stack.indexOf(self.application_page))
+        self.install_app_update()
 
     def install_app_update(self):
         if (
@@ -762,11 +816,13 @@ class WorkbenchMixin:
 
         def checked(values):
             self.delay_results.update({(profile_id, name): value for name, value in values.items()})
+            self.record_route_results(profile_id, values)
             for group in self.groups_data:
                 for item in group["members"]:
                     if item["name"] in values:
                         item["delay"] = values[item["name"]]["value"]
             self.render_nodes()
+            self.update_network_tag()
             available = sum(value["value"] > 0 for value in values.values())
             self.delay_status.setText(
                 f"{datetime.now():%H:%M:%S} · Доступно {available}/{len(values)} · Авто: 15 с"
@@ -1083,13 +1139,18 @@ class WorkbenchMixin:
     def show_checks(self, checks):
         self.diagnostic_list.clear()
         for check in checks:
-            prefix = {"ok": "ГОТОВО", "error": "ОШИБКА", "info": "ИНФОРМАЦИЯ"}[check["state"]]
+            prefix = {
+                "ok": "ГОТОВО",
+                "error": "ОШИБКА",
+                "info": "ИНФОРМАЦИЯ",
+                "warning": "ВНИМАНИЕ",
+            }[check["state"]]
             self.diagnostic_list.addItem(
                 QListWidgetItem(f"{prefix} · {check['title']}\n{check['detail']}")
             )
             self.log(
                 f"{check['title']}: {check['detail']}",
-                "error" if check["state"] == "error" else "info",
+                check["state"] if check["state"] in {"error", "warning"} else "info",
                 "Диагностика",
             )
         self.log(f"Проверок завершено: {len(checks)}.", source="Диагностика")
@@ -1135,6 +1196,9 @@ class WorkbenchMixin:
                     "detail": f"Прокси 127.0.0.1:{mixed} · режим {config.get('mode', '—')} · IPv6 {config.get('ipv6', '—')} · логи {config.get('log-level', '—')}",
                 }
             )
+            ipv6 = ipv6_route_check(config.get("ipv6") is True)
+            if ipv6:
+                checks.append(ipv6)
             try:
                 with Controller(port, secret) as controller:
                     dns = controller.request(

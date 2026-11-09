@@ -5,6 +5,7 @@ import html
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QColor,
+    QImage,
     QLinearGradient,
     QPainter,
     QPainterPath,
@@ -32,6 +33,8 @@ class WorldMap(QWidget):
         self.setAccessibleName("Карта мира · Не подключено")
         self._land = QPainterPath()
         self._flags = {}
+        self._background_key = None
+        self._background_layers = None
         self.hit_regions = []
         self.setMouseTracking(True)
         for ring in map_data()["land"]:
@@ -97,23 +100,29 @@ class WorldMap(QWidget):
             return True
         return super().event(event)
 
-    def paintEvent(self, event):
-        self.hit_regions = []
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        locations = self.locations
-        if self.client_point:
-            locations = [{**self.client_point, "role": "client", "step": -1}, *locations]
-        view = project_view(
-            locations,
+    def background_layers(self, view):
+        ratio = self.devicePixelRatioF()
+        key = (
             self.width(),
             self.height(),
-            self.top_inset,
-            self.bottom_inset,
-            self.auto_zoom and self.connected,
+            ratio,
+            view["scale"],
+            view["x"],
+            view["y"],
+            tuple(view["frame"]),
         )
+        if key == self._background_key:
+            return self._background_layers
+        source = QImage(
+            max(1, round(self.width() * ratio)),
+            max(1, round(self.height() * ratio)),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        source.setDevicePixelRatio(ratio)
+        source.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(source)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         scale = view["scale"]
-        width = 360 * scale
         map_rect = QRectF(*view["frame"])
         painter.save()
         painter.setClipRect(QRectF(self.rect()))
@@ -139,9 +148,62 @@ class WorldMap(QWidget):
             for x in range(0, self.width(), 6):
                 painter.drawPoint(QPointF(x, y))
         painter.restore()
+        painter.end()
+        # A low-resolution layer softens only the map; route markers are drawn later.
+        blurred = source.scaled(
+            max(1, source.width() // 9),
+            max(1, source.height() // 9),
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        ).scaled(
+            source.size(),
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        blurred.setDevicePixelRatio(ratio)
+
+        def feather(layer, horizontal_inset, vertical_inset):
+            mask = QPainter(layer)
+            mask.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+            for gradient, inset in (
+                (QLinearGradient(0, 0, self.width(), 0), horizontal_inset),
+                (QLinearGradient(0, 0, 0, self.height()), vertical_inset),
+            ):
+                for stop, alpha in ((0, 0), (inset, 255), (1 - inset, 255), (1, 0)):
+                    gradient.setColorAt(stop, QColor(255, 255, 255, alpha))
+                mask.fillRect(QRectF(self.rect()), gradient)
+            mask.end()
+
+        feather(blurred, 0.025, 0.04)
+        feather(source, 0.10, 0.13)
+        self._background_key = key
+        self._background_layers = (blurred, source)
+        return self._background_layers
+
+    def paintEvent(self, event):
+        self.hit_regions = []
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        locations = self.locations
+        if self.client_point:
+            locations = [{**self.client_point, "role": "client", "step": -1}, *locations]
+        view = project_view(
+            locations,
+            self.width(),
+            self.height(),
+            self.top_inset,
+            self.bottom_inset,
+            self.auto_zoom and self.connected,
+            cover=not self.connected,
+        )
+        width = 360 * view["scale"]
+        map_rect = QRectF(*view["frame"])
+        blurred, sharp = self.background_layers(view)
+        painter.drawImage(QPointF(0, 0), blurred)
+        painter.drawImage(QPointF(0, 0), sharp)
         fade = QLinearGradient(0, self.height() - self.bottom_inset - 80, 0, self.height())
         fade.setColorAt(0, QColor(9, 23, 32, 0))
-        fade.setColorAt(1, QColor(9, 23, 32, 240))
+        fade.setColorAt(1, QColor(9, 23, 32, 240 if self.connected else 130))
         painter.fillRect(
             QRectF(0, self.height() - self.bottom_inset - 80, self.width(), self.bottom_inset + 80),
             fade,

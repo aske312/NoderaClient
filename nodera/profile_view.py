@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 
 from nodera.models import Profile, Settings
 from nodera.pro_provenance import is_verified_profile
+from nodera.subscription import ACCESS_MESSAGES
 
 STRATEGIES = {
     "select": "Ручной выбор",
@@ -84,6 +85,28 @@ def quota_view(profile: Profile | None, now: float | None = None) -> dict:
         "exhausted": total is not None and total > 0 and used >= total,
         "expired": expiry is not None and expiry > 0 and expiry <= now,
     }
+
+
+def subscription_access_state(profile: Profile | None, now: float | None = None) -> str:
+    if not profile:
+        return ""
+    state = profile.access_state
+    if not state:
+        quota = quota_view(profile, now)
+        state = "expired" if quota["expired"] else "exhausted" if quota["exhausted"] else ""
+    return state
+
+
+def subscription_notice(profile: Profile | None, now: float | None = None, *, short=False) -> str:
+    state = subscription_access_state(profile, now)
+    if short:
+        return {
+            "missing": "Подписка удалена или неверная ссылка.",
+            "expired": "Срок подписки истёк.",
+            "exhausted": "Лимит трафика исчерпан.",
+            "denied": "Доступ к подписке ограничен.",
+        }.get(state, "")
+    return ACCESS_MESSAGES.get(state, "")
 
 
 def rule_rows(config: dict) -> list[tuple[str, str, str]]:

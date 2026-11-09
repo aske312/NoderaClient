@@ -2,7 +2,7 @@ import os
 import threading
 import time
 from dataclasses import replace
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 
 import pytest
 
@@ -11,6 +11,7 @@ from nodera.controller import Controller
 from nodera.core import Core
 from nodera.models import ClientError, Profile, Settings
 from nodera.provider_cache import RuleCache
+from tests.loopback import ThreadingHTTPServer
 
 
 def setup_cache(tmp_path, profile=None):

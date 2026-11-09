@@ -1,14 +1,16 @@
 param(
     [switch]$Clean,
     [string]$SubscriptionProxy,
-    [switch]$ImportDevData
+    [switch]$ImportDevData,
+    [string]$PythonExecutable
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Push-Location -LiteralPath $projectRoot
 try {
-    & (Join-Path $PSScriptRoot 'build.ps1') -TestBuild -Clean:$Clean
+    $testPython = if ($PythonExecutable) { (Resolve-Path -LiteralPath $PythonExecutable).Path } else { Join-Path $projectRoot '.venv\Scripts\python.exe' }
+    & (Join-Path $PSScriptRoot 'build.ps1') -TestBuild -Clean:$Clean -PythonExecutable $testPython
     $shell = New-Object -ComObject WScript.Shell
     $buildShortcut = $shell.CreateShortcut((Join-Path $projectRoot 'dist\Nodera-Test.lnk'))
     $appPath = $buildShortcut.TargetPath
@@ -39,14 +41,14 @@ import sys
 from nodera.app import development_subscription_proxy
 development_subscription_proxy(["--subscription-proxy=" + sys.argv[1]])
 '@
-        $validation | & (Join-Path $projectRoot '.venv\Scripts\python.exe') - $SubscriptionProxy
+        $validation | & $testPython - $SubscriptionProxy
         if ($LASTEXITCODE -ne 0) { throw 'Invalid subscription proxy.' }
         @{ subscription_proxy = $SubscriptionProxy } | ConvertTo-Json |
             Set-Content -LiteralPath (Join-Path $testData 'test-network.json') -Encoding utf8
     }
-    & (Join-Path $projectRoot '.venv\Scripts\python.exe') (Join-Path $PSScriptRoot 'launch_test.py') --record-build $appPath
+    & $testPython (Join-Path $PSScriptRoot 'launch_test.py') --record-build $appPath
     if ($LASTEXITCODE -ne 0) { throw 'Could not record the completed test build.' }
-    & (Join-Path $PSScriptRoot 'install-test-launcher.ps1')
+    & (Join-Path $PSScriptRoot 'install-test-launcher.ps1') -PythonExecutable $testPython
     $desktop = [Environment]::GetFolderPath('Desktop')
     Write-Output ('Test application: ' + $appPath)
     Write-Output ('Test data: ' + $testData)

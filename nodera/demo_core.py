@@ -116,6 +116,10 @@ class DemoCore(Core):
 
     def delay(self, member):
         if self.scenarios and self.profile:
+            try:
+                self.scenarios.check_subscription(self.profile.id)
+            except ClientError:
+                return 0
             return self.scenarios.condition(self.profile.id, member, self.node_names.index(member))[
                 "delay"
             ]

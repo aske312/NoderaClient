@@ -2,15 +2,14 @@ import ipaddress
 import re
 
 from PySide6.QtWidgets import (
-    QDialog,
     QDialogButtonBox,
     QFormLayout,
     QLabel,
     QLineEdit,
-    QVBoxLayout,
 )
 
 from nodera.controls import ComboBox as QComboBox
+from nodera.modals import AppDialog
 from nodera.models import ClientError, visible_proxies
 
 
@@ -42,12 +41,12 @@ def make_rule(kind, condition, target):
     return f"{kind},{condition},{target}" + (",no-resolve" if kind.startswith("IP-CIDR") else "")
 
 
-class RuleDialog(QDialog):
+class RuleDialog(AppDialog):
     def __init__(self, profile, rule=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Локальное правило")
-        self.setMinimumWidth(430)
-        layout = QVBoxLayout(self)
+        self.setMinimumWidth(400)
+        layout = self.content_layout()
         form = QFormLayout()
         self.kind = QComboBox()
         self.kind.addItems(["DOMAIN-SUFFIX", "DOMAIN", "IP-CIDR", "IP-CIDR6", "PROCESS-NAME"])
@@ -65,7 +64,7 @@ class RuleDialog(QDialog):
         form.addRow("Условие", self.condition)
         form.addRow("Действие", self.target)
         layout.addLayout(form)
-        self.message = QLabel("Локальные правила применяются перед правилами подписки.")
+        self.message = QLabel("Приоритет выше правил подписки.")
         self.message.setWordWrap(True)
         layout.addWidget(self.message)
         if rule:

@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLineEdit,
     QPushButton,
+    QStackedLayout,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -22,7 +23,14 @@ from nodera.controls import SubscriptionSelector
 from nodera.geolocation import verified_locations
 from nodera.profile_view import effective_tun, format_bytes, policy_view, quota_view
 from nodera.routes import active_route_views, route_text
-from nodera.widgets import AddProfileButton, ConnectButton, RouteButton, label, line_icon
+from nodera.widgets import (
+    AddProfileButton,
+    ConnectButton,
+    ElidedLabel,
+    RouteButton,
+    label,
+    line_icon,
+)
 
 
 class PresentationMixin:
@@ -31,10 +39,11 @@ class PresentationMixin:
         self.world_map = layout.parentWidget().world_map
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)
-        self.dashboard_header = QWidget()
+        self.dashboard_header = QFrame()
+        self.dashboard_header.setObjectName("dashboardHeader")
         self.dashboard_header.setFixedHeight(38)
         header = QHBoxLayout(self.dashboard_header)
-        header.setContentsMargins(8, 4, 8, 4)
+        header.setContentsMargins(8, 3, 8, 3)
         header.setSpacing(8)
         identity = QVBoxLayout()
         identity.setContentsMargins(0, 0, 0, 0)
@@ -73,7 +82,7 @@ class PresentationMixin:
         self.state.hide()
         self.network_tag = QPushButton("Не проверено")
         self.network_tag.setObjectName("connectionStatus")
-        self.network_tag.clicked.connect(self.check_connection)
+        self.network_tag.clicked.connect(self.check_route_status)
         self.dashboard_update_button = QPushButton()
         self.dashboard_update_button.setIcon(line_icon("refresh"))
         self.dashboard_update_button.setFixedSize(30, 30)
@@ -90,6 +99,8 @@ class PresentationMixin:
         self.open_profile.clicked.connect(lambda: self.navigate(1))
         header.addWidget(self.dashboard_update_button)
         self.dashboard_options_button = QPushButton("Опции")
+        self.dashboard_options_button.setObjectName("dashboardOptions")
+        self.dashboard_options_button.setFixedHeight(30)
         self.dashboard_options_button.clicked.connect(self.channel_options)
         header.addWidget(self.dashboard_options_button)
         header.addWidget(self.open_profile)
@@ -97,17 +108,17 @@ class PresentationMixin:
 
         stage = QWidget()
         stage.setObjectName("connectionCanvas")
-        canvas = QGridLayout(stage)
-        canvas.setContentsMargins(0, 0, 0, 28)
-        stage.setMinimumHeight(240)
-        control_bar = QWidget()
-        control_bar.setFixedHeight(148)
+        stage.setMinimumHeight(100)
+        control_bar = QFrame()
+        self.dashboard_dock = control_bar
+        control_bar.setObjectName("dashboardDock")
+        control_bar.setFixedHeight(158)
         controls = QGridLayout(control_bar)
-        controls.setContentsMargins(2, 0, 2, 0)
-        controls.setSpacing(12)
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(22)
         for column in (0, 2):
             controls.setColumnStretch(column, 1)
-            controls.setColumnMinimumWidth(column, 120)
+            controls.setColumnMinimumWidth(column, 180)
         route_container = QWidget()
         self.route_panel = route_container
         route_policy = route_container.sizePolicy()
@@ -126,15 +137,18 @@ class PresentationMixin:
         self.current_route_button.clicked.connect(lambda: self.navigate(4 if self.profile else 1))
         route.addWidget(self.current_route_button, alignment=Qt.AlignmentFlag.AlignLeft)
         route.addStretch()
-        controls.addWidget(route_container, 0, 0)
+        route_container.setParent(self)
+        route_container.hide()
         self.power = ConnectButton()
-        self.power.setFixedSize(110, 110)
+        self.power.setFixedSize(100, 100)
         self.power.setAccessibleName("Подключить или отключить")
         self.power.clicked.connect(self.toggle)
         center = QWidget()
+        center.setFixedWidth(240)
         center_layout = QVBoxLayout(center)
         center_layout.setContentsMargins(0, 0, 0, 0)
-        center_layout.setSpacing(6)
+        center_layout.setSpacing(4)
+        self.network_tag.setFixedHeight(24)
         center_layout.addWidget(self.power, 0, Qt.AlignmentFlag.AlignHCenter)
         center_layout.addWidget(self.network_tag, 0, Qt.AlignmentFlag.AlignHCenter)
         controls.addWidget(center, 0, 1, Qt.AlignmentFlag.AlignCenter)
@@ -142,80 +156,123 @@ class PresentationMixin:
         session_policy = self.session_panel.sizePolicy()
         session_policy.setRetainSizeWhenHidden(True)
         self.session_panel.setSizePolicy(session_policy)
-        session = QVBoxLayout(self.session_panel)
+        session = QHBoxLayout(self.session_panel)
         session.setContentsMargins(0, 0, 0, 0)
-        session.addStretch()
-        caption = label("Время сеанса", "muted")
-        caption.setAlignment(Qt.AlignmentFlag.AlignRight)
-        session.addWidget(caption)
         self.session_time = label("00:00:00", "sessionTime")
         self.session_time.setAlignment(Qt.AlignmentFlag.AlignRight)
         session.addWidget(self.session_time)
-        session.addStretch()
-        controls.addWidget(self.session_panel, 0, 2)
-        canvas.addWidget(control_bar, 0, 0, Qt.AlignmentFlag.AlignBottom)
         layout.addWidget(stage, 1)
         self.route_summary = label("", "routeSummary", True)
         self.route_summary.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.route_summary.hide()
         layout.addWidget(self.route_summary)
-        self.hint = label("", "muted", True)
+        self.dashboard_feedback = QWidget()
+        self.dashboard_feedback.setObjectName("dashboardFeedback")
+        self.dashboard_feedback.setFixedSize(232, 20)
+        feedback = QStackedLayout(self.dashboard_feedback)
+        feedback.setContentsMargins(0, 0, 0, 0)
+        feedback.setSpacing(0)
+        self.hint = ElidedLabel()
+        self.hint.setObjectName("muted")
         self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.hint)
-        self.subscription_status = label("", "muted")
+        self.hint.setFixedHeight(18)
+        feedback.addWidget(self.hint)
+        self.subscription_status = ElidedLabel()
+        self.subscription_status.setObjectName("muted")
         self.subscription_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.subscription_status.setFixedHeight(18)
         self.subscription_status.hide()
-        layout.addWidget(self.subscription_status)
+        feedback.addWidget(self.subscription_status)
+        self.dashboard_access_notice = ElidedLabel()
+        self.dashboard_access_notice.setObjectName("subscriptionWarning")
+        self.dashboard_access_notice.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.dashboard_access_notice.setFixedHeight(18)
+        self.dashboard_access_notice.hide()
+        feedback.addWidget(self.dashboard_access_notice)
         self.subscription_feedback_timer = QTimer(self)
         self.subscription_feedback_timer.setSingleShot(True)
         self.subscription_feedback_timer.setInterval(8000)
         self.subscription_feedback_timer.timeout.connect(lambda: self.show_subscription_state(None))
 
+        center_layout.addWidget(self.dashboard_feedback, 0, Qt.AlignmentFlag.AlignHCenter)
+        plan_panel = QFrame()
+        self.dashboard_plan_panel = plan_panel
+        plan_panel.setObjectName("dashboardInfoCard")
+        plan_panel.setFixedSize(230, 118)
+        plan_policy = plan_panel.sizePolicy()
+        plan_policy.setRetainSizeWhenHidden(True)
+        plan_panel.setSizePolicy(plan_policy)
+        plan = QVBoxLayout(plan_panel)
+        plan.setContentsMargins(12, 10, 12, 10)
+        plan.setSpacing(5)
+        plan.addWidget(label("Подписка", "dashboardCaption"))
+
         rail = QFrame()
         self.quota_panel = rail
         rail.setObjectName("quotaRail")
-        row = QHBoxLayout(rail)
+        row = QVBoxLayout(rail)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
         self.quota_labels = []
         for heading in ("Трафик", "Срок", "Стратегия"):
             cell = QHBoxLayout()
-            cell.setContentsMargins(12, 7, 12, 7)
-            cell.setSpacing(7)
+            cell.setContentsMargins(0, 2, 0, 2)
+            cell.setSpacing(8)
             cell.addWidget(label(heading, "muted"))
+            cell.addStretch()
             value, detail = label("—", "quotaValue"), label("", "railDetail", True)
             detail.hide()
             cell.addWidget(value)
             cell.addWidget(detail)
             self.quota_labels.append((value, detail))
             row.addLayout(cell)
-        layout.addWidget(rail, 0, Qt.AlignmentFlag.AlignHCenter)
+        plan.addWidget(rail)
+        plan.addStretch()
+        controls.addWidget(
+            plan_panel, 0, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom
+        )
+
+        session_block = QFrame()
+        session_block.setObjectName("dashboardInfoCard")
+        session_block.setFixedSize(230, 118)
+        session_layout = QVBoxLayout(session_block)
+        session_layout.setContentsMargins(12, 10, 12, 10)
+        session_layout.setSpacing(7)
+        session_heading = QHBoxLayout()
+        session_heading.addWidget(label("Сеанс", "dashboardCaption"))
+        session_heading.addStretch()
+        session_heading.addWidget(self.session_panel)
+        session_layout.addLayout(session_heading)
+        self.dashboard_session_empty = label("Нет активного сеанса", "dashboardSummary", True)
+        session_layout.addWidget(self.dashboard_session_empty)
 
         self.traffic_panel = QWidget()
-        row = QHBoxLayout(self.traffic_panel)
-        row.setContentsMargins(14, 0, 14, 0)
+        row = QGridLayout(self.traffic_panel)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setHorizontalSpacing(8)
+        row.setVerticalSpacing(5)
         self.stats, self.stat_rates = [], []
-        for heading in ("Получено", "Отправлено", "Потоки"):
-            cell = QHBoxLayout()
-            cell.setSpacing(6)
-            caption = QHBoxLayout()
-            caption.addWidget(label(heading, "muted"))
-            caption.addSpacing(8)
-            value = label("—", "statValue")
-            caption.addWidget(value)
-            caption.addStretch()
-            cell.addLayout(caption)
+        for column, heading in enumerate(("Получено", "Отправлено", "Потоки")):
+            row.setColumnStretch(column, 1)
+            row.addWidget(label(heading, "dashboardMetricCaption"), 0, column)
+            value = label("—", "dashboardMetric")
+            row.addWidget(value, 1, column)
             rate = label("", "railDetail")
-            cell.addWidget(rate)
+            row.addWidget(rate, 2, column)
             self.stats.append(value)
             self.stat_rates.append(rate)
-            row.addLayout(cell, 1)
         self.stat_rates[2].hide()
-        layout.addWidget(self.traffic_panel)
+        session_layout.addWidget(self.traffic_panel)
+        session_layout.addStretch()
+        controls.addWidget(
+            session_block, 0, 2, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom
+        )
+        layout.addWidget(control_bar)
 
     def refresh_session_visibility(self):
         self.traffic_panel.setVisible(self.connected)
         self.session_panel.setVisible(self.connected and self.session_tun)
+        self.dashboard_session_empty.setVisible(not self.connected)
         self.route_panel.hide()
 
     def build_routes(self):
@@ -370,6 +427,7 @@ class PresentationMixin:
         self.rule_count.setText(f"{visible} из {self.rule_table.rowCount()}")
 
     def refresh_dashboard(self):
+        self.refresh_subscription_notices()
         self.refresh_session_visibility()
         self.update_network_tag()
         if not self.connected and not self.task:
@@ -380,22 +438,19 @@ class PresentationMixin:
             )
         quota = quota_view(self.profile)
         policy = self.profile_policy
-        self.quota_panel.setVisible(
-            self.profile is not None
-            and quota["total"] is not None
-            and quota["total"] > 0
-            and quota["expiry"] is not None
-            and quota["expiry"] > 0
-            and policy.get("strategy_known", False)
+        has_metrics = self.profile is not None and (
+            quota["total"] is not None or quota["expiry"] is not None
         )
+        self.dashboard_plan_panel.setVisible(has_metrics)
+        self.quota_panel.setVisible(has_metrics)
         traffic_detail = "Нет данных"
         if quota["total"] is not None:
             traffic_detail = f"Использовано {format_bytes(quota['used'])}"
             if quota["total"]:
                 traffic_detail += f" из {format_bytes(quota['total'])}"
-        self.quota_labels[0][0].setText(quota["traffic"] if self.profile else "—")
+        self.quota_labels[0][0].setText(quota["traffic"] if quota["total"] is not None else "—")
         self.quota_labels[0][1].setText(traffic_detail if self.profile else "")
-        self.quota_labels[1][0].setText(quota["days"] if self.profile else "—")
+        self.quota_labels[1][0].setText(quota["days"] if quota["expiry"] is not None else "—")
         try:
             expiry = (
                 f"До {datetime.fromtimestamp(quota['expiry']):%d.%m.%Y}" if quota["expiry"] else ""

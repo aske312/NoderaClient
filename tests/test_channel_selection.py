@@ -211,6 +211,8 @@ def test_modal_keeps_settings_progress_report_and_explicit_decisions(
     from nodera.storage import Store
     from nodera.ui import MainWindow
 
+    # Tier verification is covered separately; this test exercises the PRO modal workflow.
+    monkeypatch.setattr(MainWindow, "is_pro_profile", lambda self, value: value is not None)
     app = QApplication.instance() or QApplication([])
     p = profile()
     library = ProfileLibrary([p], p.id)

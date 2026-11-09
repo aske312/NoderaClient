@@ -1,9 +1,40 @@
 """A continuous application canvas with a floating navigation dock."""
 
+
+def prepare_fonts(app):
+    """Load the same Windows fonts once for the client, installer and UI checks."""
+    import os
+    from pathlib import Path
+
+    from PySide6.QtGui import QFontDatabase
+
+    if os.name != "nt" or app.property("noderaFontsLoaded"):
+        return
+    fonts = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+    for name in ("segoeui.ttf", "seguisb.ttf"):
+        QFontDatabase.addApplicationFont(str(fonts / name))
+    app.setProperty("noderaFontsLoaded", True)
+
+
+def configure_style(app):
+    prepare_fonts(app)
+    app.setStyle("Fusion")
+    app.setStyleSheet(STYLE)
+
+
 STYLE = """
 QWidget { background: transparent; color: #e4eff2; font-family: 'Segoe UI'; font-size: 12px; }
 QMainWindow, QDialog, QMessageBox { background: #091720; }
 QDialog#proOptions { background: transparent; }
+QDialog#appModal { background: transparent; }
+QWidget#modalBody { background: transparent; }
+QLabel#modalHeading { font-size: 16px; font-weight: 600; color: #dcece8; }
+QDialog#appModal QPushButton { padding: 4px 10px; }
+QDialog#appModal QLineEdit { padding: 4px 7px; }
+QDialog#appModal QComboBox { padding: 4px 28px 4px 8px; min-height: 16px; }
+QLabel#modalDescription { color: #a5bdc6; line-height: 1.4; }
+QPushButton#dangerAction { background: #422d31; border: 1px solid #78505a; color: #e7b7bf; }
+QPushButton#dangerAction:hover { background: #56363e; border-color: #a46976; }
 QPushButton#proOptionCard { background: #0d222c; border: 1px solid #1d3a47; border-radius: 10px; text-align: left; }
 QPushButton#proOptionCard:hover, QPushButton#proOptionCard:focus { background: #15313b; border-color: #417980; }
 QPushButton#protocolPicker { text-align: left; font-weight: 400; }
@@ -13,10 +44,13 @@ QListWidget#protocolChoices::item { padding: 3px 4px; border: none; border-radiu
 QListWidget#protocolChoices::indicator { width: 15px; height: 15px; border: 1px solid #33515e; border-radius: 4px; background: #0a1d27; }
 QListWidget#protocolChoices::indicator:checked { background: #69c8aa; border-color: #80dfc0; }
 QLabel { background: transparent; }
+QLabel#subscriptionWarning { color: #edbba4; }
+QWidget#dashboardFeedback QLabel { font-size: 11px; }
 QLabel:disabled { color: #496572; }
 QWidget#titleBar { background: transparent; border: none; }
 QFrame#windowFrame, QWidget#windowBody, QStackedWidget, QScrollArea { background: transparent; border: none; }
 QLabel#windowTitle { color: #b5cbd3; font-size: 12px; font-weight: 600; }
+QWidget#titleBar[compact="true"] QLabel#windowTitle { font-size: 14px; color: #d5e6e7; }
 QFrame#navigationDock { background: #0d222c; border: 1px solid #28424d; border-radius: 16px; }
 QToolButton#dockTab { background: transparent; border: 1px solid transparent; border-radius: 9px; padding: 4px 7px; color: #8da6b1; font-weight: 500; }
 QToolButton#dockTab:hover { background: #17343e; color: #e4eff2; }
@@ -78,7 +112,22 @@ QLabel#proBadge { background: #173e37; color: #8cddbd; border: 1px solid #306a56
 QFrame#applicationUpdates { background: #0d222c; border: 1px solid #1d3a47; border-radius: 10px; }
 QPushButton#dangerAction { background: transparent; border-color: #493839; color: #c7908d; }
 QPushButton#dangerAction:hover { background: #38272b; border-color: #80504f; }
-QFrame#quotaRail { background: #0c1e28; border: none; border-radius: 14px; }
+QFrame#dashboardHeader, QFrame#dashboardDock { background: transparent; border: none; }
+QFrame#dashboardHeader QComboBox#profilePicker { background: rgba(13, 35, 45, 210); border: 1px solid rgba(61, 101, 116, 155); border-radius: 12px; font-size: 13px; }
+QFrame#dashboardHeader QPushButton#dashboardIcon { background: rgba(13, 35, 45, 190); border: 1px solid rgba(61, 101, 116, 145); border-radius: 15px; }
+QFrame#dashboardHeader QPushButton#dashboardOptions { background: rgba(13, 35, 45, 190); border: 1px solid rgba(61, 101, 116, 145); border-radius: 15px; padding: 3px 12px; }
+QFrame#dashboardInfoCard { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(18, 43, 55, 175), stop:1 rgba(9, 25, 35, 155)); border: 1px solid rgba(66, 109, 122, 110); border-radius: 16px; }
+QFrame#dashboardDock QPushButton#connectionStatus { background: rgba(20, 45, 55, 210); border: 1px solid #2b4855; border-radius: 10px; font-size: 11px; color: #9bbbc5; padding: 2px 8px; }
+QFrame#dashboardDock QPushButton#connectionStatus[state="ok"] { background: rgba(21, 59, 50, 220); border-color: #376754; color: #9ce2c8; }
+QFrame#dashboardDock QPushButton#connectionStatus[state="error"] { background: rgba(59, 43, 38, 220); border-color: #735044; color: #edbba4; }
+QFrame#dashboardDock QPushButton#connectionStatus[state="slow"], QFrame#dashboardDock QPushButton#connectionStatus[state="unstable"] { background: rgba(54, 44, 29, 220); border-color: #665739; color: #d3c095; }
+QFrame#dashboardDock QPushButton#connectionStatus[state="checking"] { background: rgba(23, 52, 63, 220); border-color: #376471; color: #a9d6df; }
+QFrame#dashboardDock QPushButton#connectionStatus:hover:enabled { border-color: #63a5a1; }
+QFrame#quotaRail { background: transparent; border: none; }
+QLabel#dashboardCaption { color: #88aebc; font-size: 10px; font-weight: 600; }
+QLabel#dashboardSummary { color: #7e9da9; font-size: 11px; }
+QLabel#dashboardMetricCaption { color: #7294a2; font-size: 10px; }
+QLabel#dashboardMetric { color: #d2e9e9; font-size: 14px; font-weight: 600; }
 QLabel#quotaValue { font-size: 13px; font-weight: 600; color: #d8edf0; }
 QLabel#railDetail { font-size: 10px; color: #5d808e; }
 QLabel#statValue { font-size: 11px; font-weight: 600; color: #acc7ce; }

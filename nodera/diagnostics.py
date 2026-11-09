@@ -1,10 +1,51 @@
 """Local preflight checks; no subscription secrets or raw core output in reports."""
 
+import errno
+import ipaddress
+import socket
+
 from nodera.bundled_core import core_manifest, resolve_core
 from nodera.core import is_admin
 from nodera.models import ClientError, Profile, Settings, visible_proxies
 from nodera.ports import choose_ports
 from nodera.profile_view import effective_tun
+
+
+def ipv6_route_available():
+    """Ask Windows to select a source/route; a UDP connect sends no payload."""
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_DGRAM) as stream:
+            stream.connect(("2001:4860:4860::8888", 53))
+            source = ipaddress.ip_address(stream.getsockname()[0].split("%")[0])
+            return not (source.is_unspecified or source.is_loopback or source.is_link_local)
+    except OSError as exc:
+        if exc.errno in {
+            errno.ENETUNREACH,
+            errno.EHOSTUNREACH,
+            errno.EADDRNOTAVAIL,
+            errno.EAFNOSUPPORT,
+        } or getattr(exc, "winerror", None) in {10049, 10051, 10065, 10047}:
+            return False
+        return None
+
+
+def ipv6_route_check(enabled):
+    if not enabled:
+        return None
+    available = ipv6_route_available()
+    if available is False:
+        return {
+            "title": "IPv6 на компьютере",
+            "state": "warning",
+            "detail": "IPv6 включён в сеансе, но Windows не может выбрать внешний IPv6-маршрут. Прямые IPv6-подключения и DNS могут давать ошибки. Проверьте сеть или отключите IPv6 в настройках Nodera.",
+        }
+    return {
+        "title": "IPv6 на компьютере",
+        "state": "ok" if available else "info",
+        "detail": "Windows выбрала IPv6-маршрут. Доступность сайтов проверяется отдельно."
+        if available
+        else "Не удалось проверить IPv6-маршрут Windows. Настройки не изменены.",
+    }
 
 
 def preflight(settings: Settings, profile: Profile | None, running: bool = False) -> list[dict]:

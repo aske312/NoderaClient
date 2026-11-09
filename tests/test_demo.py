@@ -15,6 +15,8 @@ from nodera.demo_core import DemoCore
 from nodera.models import ClientError, Profile, ProfileLibrary, Settings
 from nodera.profile_view import is_pro_subscription
 from nodera.storage import Store
+from nodera.subscription import SubscriptionUnavailable
+from nodera.test_scenarios import DEMO_IDS, DEMO_PROFILES
 
 
 @pytest.fixture
@@ -32,17 +34,74 @@ def no_network(monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", forbidden)
 
 
-def test_two_demo_profiles_have_distinct_tiers_and_persist_changes(tmp_path):
+def test_demo_fixtures_are_unsigned_and_persist_changes(tmp_path):
     store = Store(tmp_path)
     prepare_demo(store)
     library = store.load_library()
-    assert len(library.profiles) == 2
-    assert [is_pro_subscription(p) for p in library.profiles] == [True, False]
-    assert library.profiles[0].id == "demo-pro"
+    assert len(library.profiles) == len(DEMO_IDS)
+    assert not any(is_pro_subscription(p) for p in library.profiles)
+    assert [p.id for p in library.profiles] == list(DEMO_IDS)
     library.profiles[1].name = "Renamed"
     store.save_library(library)
     prepare_demo(store)
     assert store.load_library().profiles[1].name == "Renamed"
+
+
+def test_demo_routes_have_three_or_four_addressed_hops(no_network):
+    from nodera.geolocation import endpoint_rows
+    from nodera.routes import node_route
+
+    lengths = set()
+    for profile in demo_library().profiles:
+        for node in profile.config["proxies"]:
+            hops, explicit = node_route(profile, node["name"])
+            assert explicit
+            assert len(hops) in (3, 4)
+            lengths.add(len(hops))
+            assert all(item["host"] and item["country"] for item in hops)
+            assert len({item["host"] for item in hops}) == len(hops)
+            assert hops[-1]["role"] == "server"
+            assert hops[-1]["country"] == node["name"][:2]
+            assert {row["host"] for row in endpoint_rows(profile, node["name"])} >= {
+                hop["host"] for hop in hops
+            }
+    assert lengths == {3, 4}
+
+
+def test_demo_tier_badges_and_options_are_local_to_demo_window(tmp_path, no_network):
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from nodera.profiles_ui import ProfilesMixin
+
+    app = QApplication.instance() or QApplication([])
+    store = Store(tmp_path)
+    prepare_demo(store)
+    library = store.load_library()
+    pro, standard = library.profiles[:2]
+    window = DemoWindow(store, store.load_settings(), pro, library)
+    try:
+        assert window.is_pro_profile(pro)
+        assert not window.is_pro_profile(standard)
+        assert not ProfilesMixin.is_pro_profile(window, pro)
+        unsigned_live = Profile("PRO", "https://312node.net/s/unsigned", {}, "")
+        assert not window.is_pro_profile(unsigned_live)
+        for profile, expected in ((pro, True), (standard, False), (pro, True)):
+            window.profile = profile
+            window.library = window.library.upsert(profile)
+            window.preview_profile_id = profile.id
+            window.refresh_profile()
+            for badge in (
+                window.home_pro_badge,
+                window.connections_pro_badge,
+                window.profile_pro_badge,
+            ):
+                assert badge.isHidden() != expected
+            assert window.dashboard_options_button.isHidden() != expected
+            assert window.profile_options.isHidden() != expected
+    finally:
+        window.exit_app()
+        app.processEvents()
 
 
 def test_seeding_adds_demos_without_replacing_live_profile_or_settings(tmp_path):
@@ -55,10 +114,67 @@ def test_seeding_adds_demos_without_replacing_live_profile_or_settings(tmp_path)
     prepare_demo(store)
     prepare_demo(store)
     library = store.load_library()
-    assert len(library.profiles) == 3
+    assert len(library.profiles) == len(DEMO_IDS) + 1
     assert library.active == real
     assert store.load_settings() == settings
-    assert sum(is_demo_profile(p) for p in library.profiles) == 2
+    assert sum(is_demo_profile(p) for p in library.profiles) == len(DEMO_IDS)
+
+
+@pytest.mark.parametrize("identity", DEMO_IDS[2:])
+def test_error_demo_profiles_are_offline_and_expose_named_failure(tmp_path, no_network, identity):
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication
+
+    from nodera.profile_view import subscription_notice
+
+    app = QApplication.instance() or QApplication([])
+    store = Store(tmp_path)
+    prepare_demo(store)
+    library = store.load_library()
+    profile = next(p for p in library.profiles if p.id == identity)
+    window = DemoWindow(store, store.load_settings(), profile, library.upsert(profile))
+    for timer in window.findChildren(QTimer):
+        timer.stop()
+    window.scenarios.clock = lambda: 0
+    try:
+        assert window.demo_mode and isinstance(window.core, DemoCore)
+        assert window.test_profile.count() == len(DEMO_IDS)
+        assert window.is_pro_profile(profile) == DEMO_PROFILES[identity]["pro"]
+        state = window.scenarios.settings(identity)["subscription"]
+        if state in {"expired", "exhausted", "removed"}:
+            assert subscription_notice(profile)
+            with pytest.raises(SubscriptionUnavailable):
+                window.core.start(profile, window.settings)
+            with pytest.raises(SubscriptionUnavailable):
+                window.fetch_subscription(profile.url, profile.name)
+            window.scenarios.subscription(identity, "normal")
+            restored = window.fetch_subscription(profile.url, profile.name)
+            assert not subscription_notice(restored)
+        else:
+            window.core.start(profile, window.settings)
+            delays = [window.core.delay(name) for name in window.core.node_names]
+            if identity == "demo-outage":
+                assert not any(delays)
+                with pytest.raises(ClientError):
+                    window.core.check_connectivity()
+            elif identity == "demo-slow":
+                assert all(delay >= 1500 for delay in delays)
+            elif identity == "demo-failover":
+                assert delays[0] == 0 and any(delays[1:])
+                assert window.core.groups()[0]["current"] != window.core.node_names[0]
+            elif identity == "demo-unstable":
+                assert delays[0] == 0
+                window.scenarios.clock = lambda: 3
+                assert window.core.delay(window.core.node_names[0]) > 0
+            elif identity == "demo-update-error":
+                assert window.core.check_connectivity()
+                with pytest.raises(ClientError, match="обновления"):
+                    window.fetch_subscription(profile.url, profile.name)
+                assert not profile.access_state
+    finally:
+        window.exit_app()
+        app.processEvents()
 
 
 def test_filtered_demo_keeps_full_mihomo_catalog_during_migration(tmp_path):

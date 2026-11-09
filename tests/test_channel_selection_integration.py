@@ -7,7 +7,7 @@ import struct
 import subprocess
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 
 import pytest
 import yaml
@@ -16,6 +16,7 @@ from nodera import channel_selection as channels
 from nodera.bundled_core import bundled_location, resolve_core
 from nodera.core import CREATE_FLAGS, free_port
 from nodera.models import Profile
+from tests.loopback import ThreadingHTTPServer
 
 
 @pytest.mark.skipif(os.name != "nt" or not bundled_location().is_file(), reason="Windows Mihomo")

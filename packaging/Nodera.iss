@@ -62,6 +62,44 @@ Name: "{autodesktop}\Nodera"; Filename: "{app}\Nodera.exe"; Tasks: desktopicon
 Filename: "{app}\Nodera.exe"; Parameters: "--remove-autostart"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "RemoveNoderaStartup"
 
 [Code]
+var
+  CleanupMode: String;
+
+function InitializeUninstall: Boolean;
+var
+  Choice: Integer;
+begin
+  CleanupMode := 'keep';
+  Result := True;
+  { Silent removal is used by upgrades and must never erase profiles. }
+  if UninstallSilent then exit;
+  { A damaged installation must still be removable, preserving its user data. }
+  if not FileExists(ExpandConstant('{app}\Nodera.exe')) then exit;
+  Result := Exec(ExpandConstant('{app}\Nodera.exe'), '--uninstall-choice', '',
+    SW_SHOWNORMAL, ewWaitUntilTerminated, Choice);
+  if Result then begin
+    if Choice = 11 then CleanupMode := 'clean';
+    if Choice = 13 then CleanupMode := 'cache';
+    if Choice = 14 then CleanupMode := 'profiles';
+    Result := (Choice = 10) or (Choice = 11) or (Choice = 13) or (Choice = 14);
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ExitCode: Integer;
+  Arguments: String;
+begin
+  if (CurUninstallStep <> usUninstall) or UninstallSilent then exit;
+  if not FileExists(ExpandConstant('{app}\Nodera.exe')) then exit;
+  Arguments := '--finish-uninstall=' + CleanupMode;
+  if not Exec(ExpandConstant('{app}\Nodera.exe'), Arguments, '',
+    SW_SHOWNORMAL, ewWaitUntilTerminated, ExitCode) then
+    RaiseException('Не удалось завершить работу Nodera. Удаление отменено.');
+  if ExitCode <> 0 then
+    RaiseException('Не удалось подготовить удаление. Повторите попытку.');
+end;
+
 function InitializeSetup: Boolean;
 begin
   { This engine is never a user-facing wizard. The signed-off frontend owns consent. }

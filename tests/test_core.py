@@ -1,7 +1,7 @@
 import os
 import socket
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 
 import httpx
 import pytest
@@ -10,6 +10,7 @@ from nodera.bundled_core import bundled_location
 from nodera.core import Core, PortConflict, free_port, ready_version, runtime_config
 from nodera.models import ClientError, Profile, Settings
 from nodera.system_proxy import SystemProxy
+from tests.loopback import ThreadingHTTPServer
 
 
 def test_ui_log_overflow_does_not_drop_persistent_network_records(tmp_path):

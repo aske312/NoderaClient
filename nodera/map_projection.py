@@ -1,9 +1,14 @@
 """Equirectangular viewport fit with antimeridian-aware route bounds."""
 
 
-def project_view(locations, width, height, top=0, bottom=0, zoom=False):
-    frame = (12, top + 4, max(40, width - 24), max(40, height - top - bottom - 8))
-    base = min(frame[2] / 360, frame[3] / 145)
+def project_view(locations, width, height, top=0, bottom=0, zoom=False, *, cover=False):
+    frame = (
+        (0, 0, max(40, width), max(40, height))
+        if cover
+        else (12, top + 4, max(40, width - 24), max(40, height - top - bottom - 8))
+    )
+    # Background maps fill the viewport; route zoom keeps its existing safe frame.
+    base = (max if cover else min)(frame[2] / 360, frame[3] / 145)
     center_x, center_y, scale = 180, 72.5, base
     if locations and zoom:
         xs = sorted((item["lon"] + 180) % 360 for item in locations)

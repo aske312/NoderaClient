@@ -1,9 +1,9 @@
-param([switch]$Clean, [switch]$Installer, [switch]$TestBuild)
+param([switch]$Clean, [switch]$Installer, [switch]$TestBuild, [string]$PythonExecutable)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Push-Location -LiteralPath $projectRoot
 try {
-    $pythonPath = Join-Path $projectRoot '.venv\Scripts\python.exe'
+    $pythonPath = if ($PythonExecutable) { (Resolve-Path -LiteralPath $PythonExecutable).Path } else { Join-Path $projectRoot '.venv\Scripts\python.exe' }
     & $pythonPath scripts/prepare_core.py
     if ($LASTEXITCODE -ne 0) { throw 'Embedded Mihomo preparation failed' }
     & $pythonPath scripts/prepare_icon.py

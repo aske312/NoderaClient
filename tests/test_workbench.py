@@ -161,6 +161,48 @@ def test_automatic_update_retries_busy_startup_and_network_failure(tmp_path, mon
         app.processEvents()
 
 
+def test_update_offer_notifies_once_and_requires_action_before_download(tmp_path, monkeypatch):
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QSystemTrayIcon
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(
+        Store(tmp_path), Settings(update_hours=0, geo_auto=False, close_to_tray=False), None
+    )
+    for timer in window.findChildren(QTimer):
+        timer.stop()
+    notices, downloads = [], []
+    monkeypatch.setattr(window.tray, "isVisible", lambda: True)
+    monkeypatch.setattr(QSystemTrayIcon, "supportsMessages", lambda: True)
+    monkeypatch.setattr(window.tray, "showMessage", lambda *args: notices.append(args))
+    monkeypatch.setattr(window, "install_app_update", lambda: downloads.append(True))
+    release = Release("9.0.0", "https://github.com/test", "a" * 64, 9)
+    monkeypatch.setattr("nodera.workbench.updater.check_release", lambda **kwargs: release)
+    try:
+        window.check_app_updates()
+        wait(app, lambda: not window.inspections)
+        assert len(notices) == 1 and not downloads
+        window.check_app_updates()
+        wait(app, lambda: not window.inspections)
+        assert len(notices) == 1
+        window.show_update_offer()
+        app.processEvents()
+        assert "9.0.0" in window.update_offer.message.text()
+        window.update_offer.reject()
+        assert not downloads
+        window.show_update_offer()
+        app.processEvents()
+        window.update_offer.action.click()
+        assert downloads == [True]
+        assert window.stack.currentWidget() == window.application_page
+    finally:
+        if getattr(window, "update_offer", None):
+            window.update_offer.close()
+        window.quit_requested = True
+        window.close()
+        app.processEvents()
+
+
 def test_background_poll_preserves_selection_and_does_not_lock_controls(tmp_path, monkeypatch):
     app = QApplication.instance() or QApplication([])
     profile = Profile(

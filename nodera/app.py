@@ -5,16 +5,18 @@ import sys
 from urllib.parse import urlsplit
 
 from PySide6.QtCore import QLockFile, QTimer
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication
 
 from nodera.autostart import handle_command
 from nodera.core import secure_directory
 from nodera.elevation import ensure_admin, wait_for_previous_instance
 from nodera.instance import RestartServer, acquire_instance, instance_name
+from nodera.modals import QMessageBox
 from nodera.models import ClientError, ProfileLibrary, Settings
 from nodera.storage import Store, data_directory
 from nodera.system_proxy import SystemProxy
-from nodera.ui import STYLE, MainWindow, app_icon
+from nodera.theme import configure_style
+from nodera.ui import MainWindow, app_icon
 from nodera.versioning import build_info
 
 
@@ -57,6 +59,11 @@ def set_app_identity(*, testing=False):
 
 
 def main() -> int:
+    from nodera.uninstall import handle_uninstall
+
+    uninstall_result = handle_uninstall(sys.argv[1:])
+    if uninstall_result is not None:
+        return uninstall_result
     command_result = handle_command(sys.argv[1:])
     if command_result is not None:
         return command_result
@@ -67,8 +74,7 @@ def main() -> int:
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("Nodera")
     app.setOrganizationName("NoderaClient")
-    app.setStyle("Fusion")
-    app.setStyleSheet(STYLE)
+    configure_style(app)
     app.setWindowIcon(app_icon())
     try:
         subscription_proxy = (

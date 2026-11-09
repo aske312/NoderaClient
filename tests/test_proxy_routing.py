@@ -11,7 +11,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import replace
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 import pytest
@@ -19,6 +19,7 @@ import pytest
 from nodera.bundled_core import bundled_location
 from nodera.core import Core
 from nodera.models import ClientError, Profile, Settings
+from tests.loopback import ThreadingHTTPServer
 from tests.test_traffic import serving
 
 pytestmark = pytest.mark.skipif(
