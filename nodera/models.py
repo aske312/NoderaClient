@@ -37,6 +37,7 @@ class Profile:
     forced_server: str = ""
     settings_initialized: bool = True
     channel_capabilities: dict[str, list[str]] = field(default_factory=dict)
+    pro_verification: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

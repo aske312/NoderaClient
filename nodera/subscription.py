@@ -11,6 +11,7 @@ from nodera.bundled_core import core_manifest
 from nodera.device_info import windows_identity
 from nodera.journal import redact
 from nodera.models import ClientError, Profile
+from nodera.pro_provenance import new_nonce, verification_record, verify_proof
 
 MAX_CONFIG_BYTES = 4 * 1024 * 1024
 
@@ -142,6 +143,7 @@ def fetch_profile(
         f"event=subscription_fetch_started host={urlsplit(url).hostname} via_proxy={proxy is not None}"
     )
     device_name, os_version = windows_identity()
+    nonce = new_nonce()
     headers = {
         "Accept": "text/yaml, application/yaml, text/plain",
         "User-Agent": f"Nodera/{__version__} (Windows; Mihomo)",
@@ -153,6 +155,7 @@ def fetch_profile(
         "X-Client-Version": __version__,
         "X-Core-Name": "mihomo",
         "X-Core-Version": core_manifest()["version"].removeprefix("v"),
+        "X-Subscription-Nonce": nonce,
     }
     try:
         with httpx.Client(
@@ -192,7 +195,17 @@ def fetch_profile(
                         raise ClientError("Конфигурация превышает допустимые 4 МБ.")
                 phase = "parse"
                 emit(f"event=subscription_body_received bytes={len(content)}")
+                claims = None
+                proof = response.headers.get("x-subscription-proof", "")
+                if proof:
+                    try:
+                        claims = verify_proof(proof, bytes(content), str(response.url), nonce)
+                    except ValueError:
+                        emit("event=subscription_pro_verification state=invalid", "warning")
+                    else:
+                        emit("event=subscription_pro_verification state=verified")
                 config = parse_config(bytes(content))
+                pro_verification = verification_record(claims, config) if claims else {}
                 usage = {}
                 for part in response.headers.get("subscription-userinfo", "").split(";"):
                     key, _, value = part.strip().partition("=")
@@ -242,4 +255,5 @@ def fetch_profile(
         config,
         datetime.now(timezone.utc).isoformat(),
         usage,
+        pro_verification=pro_verification,
     )

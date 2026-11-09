@@ -267,6 +267,8 @@ class ProfilesMixin:
         pro = is_pro_subscription(self.profile)
         for badge in (self.home_pro_badge, self.connections_pro_badge):
             badge.setVisible(pro)
+            badge.setToolTip("PRO")
+            badge.setAccessibleName("PRO")
         row_height = max(52, self.profile_list.sizeHintForRow(0))
         self.profile_list.setFixedHeight(
             min(6, max(2, len(self.library.profiles))) * row_height + 6

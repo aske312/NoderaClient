@@ -18,6 +18,9 @@ PACKAGES = (
     "certifi",
     "PyYAML",
     "typing_extensions",
+    "cryptography",
+    "cffi",
+    "pycparser",
 )
 
 

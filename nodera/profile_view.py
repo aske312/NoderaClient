@@ -6,6 +6,7 @@ from dataclasses import replace
 from urllib.parse import urlsplit
 
 from nodera.models import Profile, Settings
+from nodera.pro_provenance import is_verified_profile
 
 STRATEGIES = {
     "select": "Ручной выбор",
@@ -16,10 +17,7 @@ STRATEGIES = {
 
 
 def is_pro_subscription(profile: Profile | None) -> bool:
-    try:
-        return profile is not None and urlsplit(profile.url).hostname == "312node.net"
-    except ValueError:
-        return False
+    return is_verified_profile(profile)
 
 
 def effective_tun(config: dict, settings: Settings) -> bool:

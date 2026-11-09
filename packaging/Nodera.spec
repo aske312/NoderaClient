@@ -34,6 +34,7 @@ a = Analysis(
         # Preserve the upstream executable byte-for-byte for runtime SHA-256 checks.
         (str(core / "mihomo.exe"), "mihomo"),
         (str(manifest), "nodera/resources"),
+        (str(root / "nodera/resources/pro-trusted-keys.json"), "nodera/resources"),
         (str(root / "nodera/resources/nodera.ico"), "nodera/resources"),
         (str(root / "nodera/resources/nodera.svg"), "nodera/resources"),
         (str(manifest.parent / "geodata.json"), "nodera/resources"),

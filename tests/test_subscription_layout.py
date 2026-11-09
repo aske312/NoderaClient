@@ -200,21 +200,30 @@ def test_updated_profile_replaces_an_inflight_ip_check(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     "url,expected",
     [
-        ("https://312node.net/s/test", True),
-        ("https://312NODE.NET:443/s/test", True),
+        ("https://312node.net/s/test", False),
+        ("https://312NODE.NET:443/s/test", False),
         ("https://312node.net.example.com/s/test", False),
         ("https://example.com/312node.net", False),
         ("https://312node.net@example.com/s/test", False),
     ],
 )
-def test_pro_tag_matches_only_the_network_host(url, expected):
+def test_domain_alone_never_confirms_pro_subscription(url, expected):
     assert is_pro_subscription(Profile("Name", url, {}, "")) is expected
 
 
 def test_pro_tags_and_compact_subscription_card(tmp_path):
+    from nodera.pro_provenance import TRUSTED_PRO_KEYS, digest, verification_record
+
     app, window = make_window(tmp_path)
     try:
         window.profile.url = "https://312node.net/s/test"
+        window.profile.pro_verification = verification_record(
+            {
+                "kid": next(iter(TRUSTED_PRO_KEYS)),
+                "url_sha256": digest(window.profile.url.encode("utf-8")),
+            },
+            window.profile.config,
+        )
         window.refresh_profile()
         window.show()
         window.resize(840, 620)
@@ -228,7 +237,7 @@ def test_pro_tags_and_compact_subscription_card(tmp_path):
                 window.profile_pro_badge,
             )
         )
-        assert "PRO" in window.profile_list.item(0).text()
+        assert "PRO · " in window.profile_list.item(0).text()
         assert window.profile_actions.height() < 300
         window.profile.url = "https://example.com/s/test"
         window.refresh_profile()
