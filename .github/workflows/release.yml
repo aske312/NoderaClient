@@ -59,12 +59,25 @@ jobs:
           $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
           if (-not (Test-Path -LiteralPath $compiler)) { throw 'Inno Setup 6.7+ must be preinstalled on the build runner' }
       - run: .\scripts\build.ps1 -Installer
+      - name: Verify frozen installer without installing
+        shell: pwsh
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP 'nodera-installer-check.json'
+          $process = Start-Process -FilePath '.\dist\installers\Nodera-Setup.exe' -ArgumentList @('--check-bundle', ('"' + $report + '"')) -WindowStyle Hidden -PassThru
+          if (-not $process.WaitForExit(60000)) { $process.Kill(); throw 'Frozen installer verification timed out' }
+          if (Test-Path -LiteralPath $report) { Get-Content -LiteralPath $report }
+          if ($process.ExitCode -ne 0) { throw 'Frozen installer verification failed' }
+          if (-not (Test-Path -LiteralPath $report)) { throw 'Frozen installer did not produce its verification report' }
+          $result = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+          if (-not $result.ok -or -not $result.pro_keys_present) { throw 'Installer resources are incomplete' }
+          Copy-Item -LiteralPath $report -Destination '.\dist\installers\installer-check.json'
       - uses: actions/upload-artifact@v4
         with:
           name: Nodera-installer
           path: |
             dist/installers/Nodera-Setup.exe
             dist/installers/Nodera-Setup.exe.sha256
+            dist/installers/installer-check.json
       - name: Create draft release for review
         if: env.RELEASE_TAG != ''
         env:

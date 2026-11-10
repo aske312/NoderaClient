@@ -6,6 +6,7 @@ resources = root / "nodera/resources"
 common = [
     (str(resources / "nodera.ico"), "nodera/resources"),
     (str(resources / "nodera.svg"), "nodera/resources"),
+    (str(resources / "pro-trusted-keys.json"), "nodera/resources"),
     (str(bundle / "build-info.json"), "installer"),
     (str(bundle / "manifest.json"), "installer"),
     (str(bundle / "LICENSE"), "installer"),
