@@ -10,6 +10,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from nodera import pro_provenance as provenance
+from nodera.models import ClientError
 from nodera.profile_view import is_pro_subscription
 from nodera.storage import Store
 from nodera.subscription import fetch_profile
@@ -181,3 +182,102 @@ def test_failed_verification_logs_no_link_credentials_or_proof(signer):
     assert any("subscription_pro_verification state=invalid" in event for event in events)
     assert "PRIVATE" not in str(events)
     assert "old_nonce" not in str(events)
+
+
+def test_server_generated_key_bootstraps_on_any_https_domain_and_survives_restart(
+    signer, monkeypatch, tmp_path
+):
+    public = next(iter(provenance.TRUSTED_PRO_KEYS.values()))
+    monkeypatch.setattr(provenance, "TRUSTED_PRO_KEYS", {})
+    url = "https://my-own-pro.example:8443/s/PRIVATE"
+
+    def handle(request):
+        return httpx.Response(
+            200,
+            content=YAML,
+            headers={
+                "X-Subscription-Proof": signer(
+                    YAML, str(request.url), request.headers["x-subscription-nonce"]
+                ),
+                "X-Subscription-Public-Key": public,
+            },
+        )
+
+    transport = httpx.MockTransport(handle)
+    profile = fetch_profile(url, "Own PRO", "device", transport)
+    assert is_pro_subscription(profile)
+    assert provenance.profile_public_key(profile) == public
+    store = Store(tmp_path)
+    store.save_profile(profile)
+    restored = store.load_library().active
+    assert is_pro_subscription(restored)
+    assert provenance.profile_public_key(restored) == public
+    assert is_pro_subscription(
+        fetch_profile(url, "Own PRO", "device", transport, expected_public_key=public)
+    )
+    assert not is_pro_subscription(replace(restored, url=url + "2"))
+    assert not is_pro_subscription(replace(restored, config={"proxies": []}))
+
+
+@pytest.mark.parametrize(
+    "failure", ["different_key", "missing_proof", "invalid_proof", "missing_key_and_proof"]
+)
+def test_saved_server_pin_rejects_replacement_and_downgrade(signer, monkeypatch, failure):
+    public = next(iter(provenance.TRUSTED_PRO_KEYS.values()))
+    monkeypatch.setattr(provenance, "TRUSTED_PRO_KEYS", {})
+
+    def handle(request):
+        headers = {"X-Subscription-Public-Key": public}
+        if failure != "missing_proof" and failure != "missing_key_and_proof":
+            headers["X-Subscription-Proof"] = signer(
+                YAML, str(request.url), request.headers["x-subscription-nonce"]
+            )
+        if failure == "different_key":
+            headers["X-Subscription-Public-Key"] = encode(b"X" * 32)
+        if failure == "invalid_proof":
+            headers["X-Subscription-Proof"] = "invalid.proof"
+        if failure == "missing_key_and_proof":
+            headers = {}
+        return httpx.Response(200, content=YAML, headers=headers)
+
+    with pytest.raises(ClientError, match="прежний ключ"):
+        fetch_profile(
+            URL, "Own PRO", "device", httpx.MockTransport(handle), expected_public_key=public
+        )
+
+
+def test_server_public_key_requires_https_and_matching_signature(signer, monkeypatch):
+    public = next(iter(provenance.TRUSTED_PRO_KEYS.values()))
+    monkeypatch.setattr(provenance, "TRUSTED_PRO_KEYS", {})
+    nonce = provenance.new_nonce()
+    for url, key in [
+        ("http://pro.example/s/token", public),
+        (URL, encode(b"X" * 32)),
+        (URL, "malformed"),
+    ]:
+        proof = signer(YAML, url, nonce)
+        with pytest.raises(ValueError):
+            provenance.verify_proof(proof, YAML, url, nonce, public_key=key)
+
+
+def test_refresh_passes_saved_pin_for_the_requested_profile(signer, monkeypatch):
+    from types import SimpleNamespace
+
+    from nodera import profiles_ui
+    from nodera.models import ProfileLibrary
+
+    profile = fetch_signed(signer)
+    expected = next(iter(provenance.TRUSTED_PRO_KEYS.values()))
+    window = SimpleNamespace(
+        connected=False,
+        settings=SimpleNamespace(device_id="device"),
+        library=ProfileLibrary([profile], profile.id),
+        core=SimpleNamespace(_record=lambda *a: None),
+    )
+    seen = []
+    monkeypatch.setattr(
+        profiles_ui, "fetch_profile", lambda *a, **kw: seen.append(kw.get("expected_public_key"))
+    )
+    profiles_ui.ProfilesMixin.fetch_subscription(window, profile.url, profile.name)
+    profiles_ui.ProfilesMixin.fetch_subscription(window, "https://another.example/s/token", "New")
+    assert seen == [expected, None]

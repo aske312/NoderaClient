@@ -177,6 +177,7 @@ def fetch_profile(
     *,
     proxy=None,
     log=None,
+    expected_public_key=None,
 ) -> Profile:
     url = validate_url(url)
     started = time.monotonic()
@@ -235,15 +236,33 @@ def fetch_profile(
                 emit(f"event=subscription_body_received bytes={len(content)}")
                 claims = None
                 proof = response.headers.get("x-subscription-proof", "")
+                public_key = response.headers.get("x-subscription-public-key")
                 if proof:
                     try:
-                        claims = verify_proof(proof, bytes(content), str(response.url), nonce)
+                        claims = verify_proof(
+                            proof,
+                            bytes(content),
+                            str(response.url),
+                            nonce,
+                            public_key=public_key,
+                            expected_public_key=expected_public_key,
+                        )
                     except ValueError:
                         emit("event=subscription_pro_verification state=invalid", "warning")
                     else:
                         emit("event=subscription_pro_verification state=verified")
+                if expected_public_key is not None and claims is None:
+                    raise ClientError(
+                        "Не удалось подтвердить прежний ключ сервера подписки. Текущая подписка сохранена."
+                    )
                 config = parse_config(bytes(content))
-                pro_verification = verification_record(claims, config) if claims else {}
+                pro_verification = (
+                    verification_record(
+                        claims, config, public_key=public_key or expected_public_key
+                    )
+                    if claims
+                    else {}
+                )
                 usage = {}
                 for part in response.headers.get("subscription-userinfo", "").split(";"):
                     key, _, value = part.strip().partition("=")

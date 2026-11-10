@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from nodera.dialogs import SubscriptionDialog
 from nodera.models import ClientError, ProfileLibrary, visible_proxies
+from nodera.pro_provenance import profile_public_key
 from nodera.profile_view import (
     format_bytes,
     is_pro_subscription,
@@ -115,12 +116,14 @@ class ProfilesMixin:
         )
         if self.connected and not self.session_tun and self.core.mixed_port:
             proxy = f"http://127.0.0.1:{self.core.mixed_port}"
+        existing = next((p for p in self.library.profiles if p.url == url.strip()), None)
         return fetch_profile(
             url,
             name,
             self.settings.device_id,
             proxy=proxy,
             log=lambda message, level="info": self.core._record(message, level, "Subscription"),
+            expected_public_key=profile_public_key(existing),
         )
 
     def build_profile(self):

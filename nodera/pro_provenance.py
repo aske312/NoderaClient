@@ -1,4 +1,4 @@
-"""Verify PRO subscription signatures using application-owned public trust anchors."""
+"""Verify PRO signatures and pin each HTTPS subscription's server identity."""
 
 import base64
 import hashlib
@@ -7,6 +7,7 @@ import re
 import secrets
 import time
 from importlib.resources import files
+from urllib.parse import urlsplit
 
 from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -32,15 +33,15 @@ def decode(value):
     return base64.b64decode(value + "=" * (-len(value) % 4), altchars=b"-_", validate=True)
 
 
-def trusted_key(identity):
-    public = decode(TRUSTED_PRO_KEYS[identity])
+def trusted_key(identity, public_key=None):
+    public = decode(public_key if public_key is not None else TRUSTED_PRO_KEYS[identity])
     if digest(public) != identity:
         raise ValueError("Invalid trusted key identity")
     return Ed25519PublicKey.from_public_bytes(public)
 
 
-def verify_proof(proof, body, url, nonce, *, now=None):
-    """Verify the wire format shared with PRO; never trust response-provided keys."""
+def verify_proof(proof, body, url, nonce, *, now=None, public_key=None, expected_public_key=None):
+    """Bootstrap a server key over verified HTTPS, then enforce the saved pin."""
     if not isinstance(proof, str) or len(proof) > 4096:
         raise ValueError("Invalid PRO proof")
     try:
@@ -61,7 +62,20 @@ def verify_proof(proof, body, url, nonce, *, now=None):
             "exp",
         }:
             raise ValueError("Invalid PRO claims")
-        trusted_key(claims["kid"]).verify(decode(signature), DOMAIN + payload)
+        if public_key is not None:
+            parsed = urlsplit(url)
+            if (
+                parsed.scheme != "https"
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+            ):
+                raise ValueError("Server key bootstrap requires HTTPS")
+        if expected_public_key is not None:
+            if public_key is not None and public_key != expected_public_key:
+                raise ValueError("Subscription server key changed")
+            public_key = expected_public_key
+        trusted_key(claims["kid"], public_key).verify(decode(signature), DOMAIN + payload)
         current = int(time.time() if now is None else now)
         if (
             type(claims["v"]) is not int
@@ -99,15 +113,19 @@ def config_digest(config):
     )
 
 
-def verification_record(claims, config):
+def verification_record(claims, config, *, public_key=None):
     # This local receipt lives inside the DPAPI-protected library. Expiration
     # limits acceptance of a network proof, not offline use of an accepted copy.
-    return {
+    record = {
         "kid": claims["kid"],
         "verified_at": int(time.time()),
         "url_sha256": claims["url_sha256"],
         "config_sha256": config_digest(config),
     }
+    if public_key is not None:
+        trusted_key(claims["kid"], public_key)
+        record["public_key"] = public_key
+    return record
 
 
 def is_verified_profile(profile):
@@ -115,14 +133,19 @@ def is_verified_profile(profile):
         return False
     try:
         record = profile.pro_verification
-        if not isinstance(record, dict) or set(record) != {
-            "kid",
-            "verified_at",
-            "url_sha256",
-            "config_sha256",
-        }:
+        if not isinstance(record, dict) or set(record) not in (
+            {
+                "kid",
+                "verified_at",
+                "url_sha256",
+                "config_sha256",
+            },
+            {"kid", "verified_at", "url_sha256", "config_sha256", "public_key"},
+        ):
             return False
-        trusted_key(record["kid"])
+        if "public_key" in record and urlsplit(profile.url).scheme != "https":
+            return False
+        trusted_key(record["kid"], record.get("public_key"))
         return (
             type(record["verified_at"]) is int
             and record["verified_at"] > 0
@@ -131,3 +154,10 @@ def is_verified_profile(profile):
         )
     except (AttributeError, KeyError, TypeError, ValueError, UnicodeError, UnsupportedAlgorithm):
         return False
+
+
+def profile_public_key(profile):
+    if not is_verified_profile(profile):
+        return None
+    record = profile.pro_verification
+    return record.get("public_key") or TRUSTED_PRO_KEYS.get(record["kid"])

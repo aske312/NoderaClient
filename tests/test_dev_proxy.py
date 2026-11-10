@@ -52,6 +52,7 @@ def test_subscription_uses_bootstrap_proxy_only_before_connection(
         subscription_proxy="http://127.0.0.1:7890",
         core=SimpleNamespace(mixed_port=12345),
         settings=SimpleNamespace(device_id="test"),
+        library=SimpleNamespace(profiles=[]),
     )
     ProfilesMixin.fetch_subscription(window, "https://example.com/s/private", "Test")
     assert calls == [expected]
