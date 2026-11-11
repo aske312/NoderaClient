@@ -1,6 +1,6 @@
 """Build-time preparation of pinned upstream binaries, license and source archive.
 
-The installed application never downloads or replaces its core at runtime.
+This prepares the bundled fallback. Runtime updates live separately in user data.
 """
 
 import hashlib

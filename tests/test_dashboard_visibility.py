@@ -111,6 +111,7 @@ def test_session_and_traffic_visibility_follow_connection_lifecycle(tmp_path, tu
 def test_first_location_retries_failure_and_marks_map_without_connection(tmp_path, monkeypatch):
     # An old failed attempt flag must not prevent a new lookup.
     app, window = make_window(tmp_path, client_location_attempted=True)
+    window.settings.geo_auto = True
     point = dict(code="DE", lat=50.1, lon=8.6, name="Frankfurt", source="ip-physical")
     calls = []
 
@@ -142,6 +143,7 @@ def test_first_location_retries_failure_and_marks_map_without_connection(tmp_pat
 
 def test_successful_location_remains_visible_if_settings_cannot_be_saved(tmp_path, monkeypatch):
     app, window = make_window(tmp_path)
+    window.settings.geo_auto = True
     point = dict(code="DE", lat=50.1, lon=8.6, name="Frankfurt", source="ip-physical")
     monkeypatch.setattr("nodera.settings_ui.detect_client_location", lambda: point)
 

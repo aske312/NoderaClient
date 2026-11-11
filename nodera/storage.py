@@ -179,20 +179,29 @@ class Store:
                 if not isinstance(data, dict) or data.get("schema") != 1:
                     raise ValueError
                 profiles = [Profile(**item) for item in data["profiles"]]
-                if any(type(profile.settings_initialized) is not bool for profile in profiles):
+                previous = {
+                    key: Profile(**item) for key, item in data.get("previous_profiles", {}).items()
+                }
+                if any(
+                    type(profile.settings_initialized) is not bool
+                    or type(profile.auto_update_paused) is not bool
+                    for profile in [*profiles, *previous.values()]
+                ):
                     raise ValueError
                 ids = [profile.id for profile in profiles]
                 if len(ids) != len(set(ids)) or any(
                     not isinstance(key, str) or not key for key in ids
                 ):
                     raise ValueError
-                library = ProfileLibrary(profiles, data["active_id"])
+                if any(key not in ids or item.id != key for key, item in previous.items()):
+                    raise ValueError
+                library = ProfileLibrary(profiles, data["active_id"], previous)
                 if (profiles and library.active is None) or (
                     not profiles and library.active_id is not None
                 ):
                     raise ValueError
                 return library
-            except (ValueError, TypeError, KeyError) as exc:
+            except (ValueError, TypeError, KeyError, AttributeError) as exc:
                 raise ClientError(
                     "Не удалось прочитать сохранённые подписки. Файл profiles.dpapi повреждён."
                 ) from exc
@@ -243,6 +252,11 @@ class Store:
             "schema": 1,
             "profiles": [asdict(profile) for profile in library.profiles],
             "active_id": library.active_id,
+            "previous_profiles": {
+                key: asdict(profile)
+                for key, profile in library.previous_profiles.items()
+                if any(item.id == key for item in library.profiles)
+            },
         }
         atomic_write(
             self.root / "profiles.dpapi",
@@ -257,4 +271,14 @@ class Store:
     def delete_profile(self) -> None:
         library = self.load_library()
         remaining = [item for item in library.profiles if item.id != library.active_id]
-        self.save_library(ProfileLibrary(remaining, remaining[0].id if remaining else None))
+        self.save_library(
+            ProfileLibrary(
+                remaining,
+                remaining[0].id if remaining else None,
+                {
+                    key: item
+                    for key, item in library.previous_profiles.items()
+                    if key != library.active_id
+                },
+            )
+        )

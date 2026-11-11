@@ -178,6 +178,7 @@ def fetch_profile(
     proxy=None,
     log=None,
     expected_public_key=None,
+    core_version=None,
 ) -> Profile:
     url = validate_url(url)
     started = time.monotonic()
@@ -198,7 +199,7 @@ def fetch_profile(
         "X-Client-Name": "Nodera",
         "X-Client-Version": __version__,
         "X-Core-Name": "mihomo",
-        "X-Core-Version": core_manifest()["version"].removeprefix("v"),
+        "X-Core-Version": core_version or core_manifest()["version"].removeprefix("v"),
         "X-Subscription-Nonce": nonce,
     }
     try:

@@ -20,10 +20,10 @@ from pathlib import Path
 import httpx
 import yaml
 
-from nodera.bundled_core import resolve_core
 from nodera.connection_journal import ConnectionJournal
 from nodera.connection_trace import ConnectionTrace
 from nodera.controller import Controller
+from nodera.core_updates import CoreUpdates
 from nodera.geodata import prepare_session_geodata
 from nodera.journal import Journal, profile_secrets, redact
 from nodera.models import ClientError, Profile, Settings, visible_proxies
@@ -290,7 +290,14 @@ class ProcessJob:
 def serialized(method):
     @wraps(method)
     def call(self, *args, **kwargs):
+        queued = time.perf_counter()
         with self._operation_lock:
+            waited = time.perf_counter() - queued
+            if waited >= 0.25:
+                self._record(
+                    f"event=core_operation_wait operation={method.__name__} wait_ms={int(waited * 1000)}",
+                    "debug",
+                )
             return method(self, *args, **kwargs)
 
     return call
@@ -307,7 +314,9 @@ class Core:
         self._log_lock = threading.Lock()
         self._logs = deque(maxlen=2000)
         self._reader = None
-        self._resolve_core = core_resolver or resolve_core
+        self.core_updates = CoreUpdates(root.parent) if core_resolver is None else None
+        self._resolve_core = core_resolver or self.core_updates.resolve
+        self.binary = None
         self.process: subprocess.Popen | None = None
         self.runtime: Path | None = None
         self.job: ProcessJob | None = None
@@ -365,12 +374,38 @@ class Core:
             raise ClientError(
                 "Для TUN нужны права администратора. Нажмите подключение в Nodera и подтвердите запрос Windows."
             )
-        for attempt in range(3):
-            self.mixed_port, self.port = choose_ports(settings.mixed_port if attempt == 0 else 0)
+        for core_attempt in range(2):
+            self.binary = binary
             try:
-                return self._start(profile, replace(settings, mixed_port=self.mixed_port), binary)
-            except PortConflict:
-                self.stop("port conflict; retry")
+                for attempt in range(3):
+                    self.mixed_port, self.port = choose_ports(
+                        settings.mixed_port if attempt == 0 else 0
+                    )
+                    try:
+                        version = self._start(
+                            profile, replace(settings, mixed_port=self.mixed_port), binary
+                        )
+                        if self.core_updates:
+                            try:
+                                self.core_updates.confirm(binary)
+                            except OSError:
+                                self._record(
+                                    "Не удалось сохранить успешный запуск нового ядра.", "warning"
+                                )
+                        return version
+                    except PortConflict:
+                        self.stop("port conflict; retry")
+                break
+            except (ClientError, OSError, subprocess.SubprocessError):
+                if (
+                    core_attempt
+                    or self._stop_requested.is_set()
+                    or not self.core_updates
+                    or not self.core_updates.rollback(expected=binary)
+                ):
+                    raise
+                self._record("Новое ядро не запустилось. Возврат к предыдущему Mihomo.", "warning")
+                binary = self._resolve_core()
         raise ClientError(
             "Не удалось автоматически занять локальные порты. Проверьте сетевые ограничения Windows и повторите подключение."
         )
@@ -383,7 +418,7 @@ class Core:
         try:
             self._startup_failure = None
             secure_directory(self.runtime)
-            prepare_session_geodata(self.runtime)
+            prepare_session_geodata(self.runtime, root=self.root.parent)
             config_path = self.runtime / "config.yaml"
             address_range = choose_tun_range() if settings.tun else None
             config = runtime_config(
@@ -700,45 +735,50 @@ class Core:
                     failed += 1
         return closed, failed
 
-    @serialized
     def recheck_routes(self):
         if not self.running or getattr(self, "forced_server", ""):
             return []
         with Controller(self.port, self.secret) as controller:
             return controller.recheck_routes(self.group_names, CONNECTIVITY_URL)
 
-    @serialized
     def delay(self, member: str) -> int:
         if not self.running:
             raise ClientError("Сначала запустите подключение.")
+        health = self.route_health
+        frozen = member in health.frozen
         with Controller(self.port, self.secret) as controller:
-            delay = controller.delay(
-                probe_name(member) if member in self.route_health.frozen else member
+            delay = controller.delay(probe_name(member) if frozen else member)
+        if frozen:
+            self.update_route_health(
+                {member: {"value": delay, "checked_at": time.time()}}, expected=health
             )
-        if member in self.route_health.frozen:
-            self.update_route_health({member: {"value": delay, "checked_at": time.time()}})
         return delay
 
     @serialized
     def probe_aliases(self):
         return {name: probe_name(name) for name in self.route_health.frozen}
 
-    @serialized
-    def update_route_health(self, values):
-        if not self.running:
-            return
-        previous = copy.deepcopy(self.route_health)
-        self.route_health.update(values, time.monotonic())
-        if set(previous.frozen) == set(self.route_health.frozen):
+    def update_route_health(self, values, *, expected=None):
+        with self._operation_lock:
+            if not self.running or expected is not None and expected is not self.route_health:
+                return
+            previous = copy.deepcopy(self.route_health)
+            self.route_health.update(values, time.monotonic())
+            if set(previous.frozen) == set(self.route_health.frozen):
+                self.frozen_routes = dict(self.route_health.frozen)
+                return
+            try:
+                self._reload_quarantine(previous)
+            except Exception:
+                self.route_health = previous
+                raise
             self.frozen_routes = dict(self.route_health.frozen)
-            return
+            self._record(f"event=route_quarantine_changed count={len(self.route_health.frozen)}")
+        # Config replacement is serialized; external health checks are not.
         try:
-            self._reload_quarantine(previous)
-        except Exception:
-            self.route_health = previous
-            raise
-        self.frozen_routes = dict(self.route_health.frozen)
-        self._record(f"event=route_quarantine_changed count={len(self.route_health.frozen)}")
+            self.recheck_routes()
+        except ClientError:
+            self._record("event=route_quarantine_healthcheck_failed", "warning")
 
     def _reload_quarantine(self, previous):
         before = quarantine_config(self._base_config, previous.frozen)
@@ -776,10 +816,30 @@ class Core:
                     controller.select(name, member)
                 except ClientError:
                     pass
-            try:
-                controller.recheck_routes(self.group_names, CONNECTIVITY_URL)
-            except ClientError:
-                self._record("event=route_quarantine_healthcheck_failed", "warning")
+
+    def recovery_status(self):
+        """Read-only local readiness check, independent of remote route health."""
+        if not self.running:
+            return False
+        try:
+            config = getattr(self, "_base_config", {})
+            require_tun = config.get("tun", {}).get("enable", False)
+            with self._client() as client:
+                if ready_version(client, require_tun) is None:
+                    return False
+            if require_tun:
+                wanted = config.get("dns", {}).get("fake-ip-range", "").split("/")[0]
+                if wanted and wanted not in {str(item.ip) for item in ipv4_assignments()}:
+                    return False
+            return True
+        except (httpx.HTTPError, ValueError, OSError, ClientError):
+            return False
+
+    @serialized
+    def reset_route_observations(self):
+        # A new physical network invalidates failure streaks, not user choices.
+        self.route_health.failures.clear()
+        self._traffic_sample = None
 
     @serialized
     def apply_profile(self, profile):
@@ -813,7 +873,14 @@ class Core:
         atomic_write(candidate, yaml.safe_dump(config, allow_unicode=True).encode())
         try:
             validation = subprocess.run(
-                [str(self._resolve_core()), "-d", str(self.runtime), "-f", str(candidate), "-t"],
+                [
+                    str(self.binary or self._resolve_core()),
+                    "-d",
+                    str(self.runtime),
+                    "-f",
+                    str(candidate),
+                    "-t",
+                ],
                 capture_output=True,
                 timeout=25,
                 creationflags=CREATE_FLAGS,

@@ -1,4 +1,5 @@
-from dataclasses import dataclass, field
+from copy import deepcopy
+from dataclasses import dataclass, field, replace
 from typing import Any
 from uuid import uuid4
 
@@ -39,12 +40,14 @@ class Profile:
     channel_capabilities: dict[str, list[str]] = field(default_factory=dict)
     pro_verification: dict[str, Any] = field(default_factory=dict)
     access_state: str = ""
+    auto_update_paused: bool = False
 
 
 @dataclass
 class ProfileLibrary:
     profiles: list[Profile] = field(default_factory=list)
     active_id: str | None = None
+    previous_profiles: dict[str, Profile] = field(default_factory=dict)
 
     @property
     def active(self):
@@ -56,7 +59,14 @@ class ProfileLibrary:
             (i for i, item in enumerate(self.profiles) if item.id == profile.id), len(profiles)
         )
         profiles.insert(index, profile)
-        return ProfileLibrary(profiles, profile.id if activate else self.active_id)
+        return ProfileLibrary(
+            profiles, profile.id if activate else self.active_id, dict(self.previous_profiles)
+        )
+
+    def remember(self, profile):
+        return replace(
+            self, previous_profiles={**self.previous_profiles, profile.id: deepcopy(profile)}
+        )
 
 
 @dataclass

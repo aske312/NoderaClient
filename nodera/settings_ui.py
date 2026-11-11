@@ -168,9 +168,9 @@ def build_settings(self):
     self.geo_auto_check = switch(self.settings.geo_auto)
     setting(
         form,
-        "Обновлять IP в фоне",
+        "Определять IP и геолокацию в фоне",
         self.geo_auto_check,
-        "Периодическая проверка активных маршрутов. При подключении и обновлении подписки IP проверяются всегда.",
+        "Фоновое определение маршрутов при запуске, подключении и обновлении подписки. Вручную — Инструменты → Геолокация.",
     )
     flush = self.flush_dns_button = QPushButton("Очистить")
     flush.clicked.connect(

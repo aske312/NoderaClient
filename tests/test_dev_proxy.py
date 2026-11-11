@@ -51,6 +51,7 @@ def test_subscription_uses_bootstrap_proxy_only_before_connection(
         session_tun=tun,
         subscription_proxy="http://127.0.0.1:7890",
         core=SimpleNamespace(mixed_port=12345),
+        core_manager=SimpleNamespace(version=lambda: "1.19.33"),
         settings=SimpleNamespace(device_id="test"),
         library=SimpleNamespace(profiles=[]),
     )

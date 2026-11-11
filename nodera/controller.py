@@ -3,6 +3,7 @@
 Contract: https://wiki.metacubex.one/api/#proxies
 """
 
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
 import httpx
@@ -131,8 +132,7 @@ class Controller:
 
     def recheck_routes(self, names, url=TEST_URL):
         proxies = self.proxies()
-        checked = []
-        failures = []
+        targets = []
         pending, visited = list(names), set()
         while pending:
             name = pending.pop(0)
@@ -147,6 +147,10 @@ class Controller:
             )
             if proxies.get(name, {}).get("type") not in {"Fallback", "URLTest", "LoadBalance"}:
                 continue
+            targets.append(name)
+
+        def check(name):
+            group = proxies[name]
             try:
                 self.request(
                     "GET",
@@ -159,9 +163,15 @@ class Controller:
                     timeout=8,
                 )
             except ClientError as exc:
-                failures.append(exc)
-                continue
-            checked.append(name)
+                return name, exc
+            return name, None
+
+        # httpx.Client supports concurrent requests. Slow groups must not delay
+        # every other group, or hold up the user's selector operations.
+        with ThreadPoolExecutor(max_workers=4, thread_name_prefix="group-health") as pool:
+            results = list(pool.map(check, targets))
+        checked = [name for name, error in results if error is None]
+        failures = [error for _, error in results if error is not None]
         if failures and not checked:
             raise failures[0]
         return checked

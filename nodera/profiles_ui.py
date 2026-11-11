@@ -124,6 +124,7 @@ class ProfilesMixin:
             proxy=proxy,
             log=lambda message, level="info": self.core._record(message, level, "Subscription"),
             expected_public_key=profile_public_key(existing),
+            core_version=self.core_manager.version(),
         )
 
     def build_profile(self):
@@ -201,6 +202,8 @@ class ProfilesMixin:
         self.rename_profile_button = QPushButton("Переименовать")
         self.rename_profile_button.setAccessibleName("Переименовать подписку")
         self.rename_profile_button.clicked.connect(self.rename_profile)
+        self.profile_rollback_button = QPushButton("Предыдущая версия")
+        self.profile_rollback_button.clicked.connect(self.rollback_card_profile)
         self.delete_button = QPushButton("Удалить")
         self.delete_button.setObjectName("dangerAction")
         self.delete_button.clicked.connect(self.delete_profile)
@@ -212,6 +215,7 @@ class ProfilesMixin:
         detail.addLayout(row)
         management = QHBoxLayout()
         management.addWidget(self.rename_profile_button)
+        management.addWidget(self.profile_rollback_button)
         management.addStretch()
         management.addWidget(self.delete_button)
         detail.addLayout(management)
@@ -376,6 +380,11 @@ class ProfilesMixin:
                 if total:
                     info += " из " + format_bytes(total)
             self.subscription_info.setText(info)
+            if profile.auto_update_paused:
+                self.subscription_info.setText(
+                    info
+                    + "\nАвтообновление приостановлено после отката. Для возобновления нажмите «Обновить»."
+                )
         else:
             self.subscription_info.setText("Подписка ещё не загружена.")
         self.refresh_card_controls()
@@ -389,6 +398,10 @@ class ProfilesMixin:
         self.profile_activate_button.setEnabled(idle and not pending)
         self.update_button.setEnabled(bool(idle and profile and not pending))
         self.rename_profile_button.setEnabled(bool(idle and profile and not pending))
+        self.profile_rollback_button.setVisible(
+            bool(profile and profile.id in self.library.previous_profiles)
+        )
+        self.profile_rollback_button.setEnabled(bool(idle and profile and not pending))
         self.delete_button.setEnabled(
             bool(idle and profile and not pending and not (current and self.connected))
         )
@@ -404,6 +417,69 @@ class ProfilesMixin:
         profile = self.card_profile()
         if profile:
             self.switch_profile(profile.id)
+
+    def rollback_card_profile(self):
+        from copy import deepcopy
+
+        from nodera.modals import confirm
+        from nodera.subscription_history import restored_profile
+
+        current = self.card_profile()
+        if (
+            self.task
+            or self.closing
+            or not current
+            or self.pending_channel_result
+            or self.channel_cancel
+        ):
+            return
+        previous = self.library.previous_profiles.get(current.id)
+        if previous is None:
+            return
+        if not confirm(
+            self,
+            "Вернуть предыдущую версию?",
+            f"«{current.name}»: подключений {len(visible_proxies(current.config))} → {len(visible_proxies(previous.config))}.\n"
+            "Локальные правила и настройки сохранятся. Автообновление этой подписки будет приостановлено до ручного обновления.",
+            "Вернуть",
+        ):
+            return
+        library = self.library
+
+        def rollback():
+            restored = restored_profile(current, previous)
+            updated = library.upsert(restored, activate=False).remember(current)
+            self.store.save_library(updated)
+            groups = None
+            if self.connected and self.session_profile and self.session_profile.id == current.id:
+                try:
+                    groups = self.core.apply_profile(restored)
+                except (ClientError, OSError):
+                    try:
+                        self.store.save_library(library)
+                    except (ClientError, OSError) as exc:
+                        raise ClientError(
+                            "Сеанс сохранён, но не удалось восстановить подписку на диске."
+                        ) from exc
+                    raise
+            return updated, restored, groups
+
+        def done(result):
+            self.library, restored, groups = result
+            self.profile = self.library.active
+            self.geo_results = {
+                key: value for key, value in self.geo_results.items() if key[0] != current.id
+            }
+            if groups is not None:
+                self.session_profile = deepcopy(restored)
+                self.delay_results.clear()
+                self.set_groups(groups)
+            self.refresh_profile()
+            self.log(
+                "Предыдущая конфигурация подписки восстановлена. Автообновление приостановлено."
+            )
+
+        self.run_task(rollback, done)
 
     def update_card_profile(self):
         profile = self.card_profile()
@@ -426,7 +502,7 @@ class ProfilesMixin:
         profile = next((item for item in self.library.profiles if item.id == profile_id), None)
         if not profile:
             return
-        library = ProfileLibrary(list(self.library.profiles), profile_id)
+        library = replace(self.library, active_id=profile_id)
         connected = self.connected
         self.state.setText("Переключение…")
 
@@ -477,6 +553,8 @@ class ProfilesMixin:
             item for item in self.library.profiles if not self.profile or item.id != self.profile.id
         ]
         for profile in candidates:
+            if profile.auto_update_paused:
+                continue
             retry = (
                 self.update_retry_at
                 if self.profile and profile.id == self.profile.id
@@ -540,6 +618,8 @@ class ProfilesMixin:
             else:
                 profile = replace(profile, settings_initialized=False)
             updated = library.upsert(profile, activate=activate)
+            if previous and previous.config != profile.config:
+                updated = updated.remember(previous)
             self.core._record("event=subscription_save_started", source="Subscription")
             try:
                 updated, settings = self.store.save_library_activation(updated, self.settings)
@@ -1026,7 +1106,11 @@ class ProfilesMixin:
             if profiles
             else None
         )
-        library = ProfileLibrary(profiles, active_id)
+        library = ProfileLibrary(
+            profiles,
+            active_id,
+            {key: item for key, item in self.library.previous_profiles.items() if key != target.id},
+        )
 
         def saved(result):
             self.library, settings = result

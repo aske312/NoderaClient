@@ -272,6 +272,7 @@ class WorkbenchMixin:
         self.app_update_progress.hide()
         update_content.addWidget(self.app_update_progress)
         layout.addWidget(updates_panel)
+        self.build_core_updates(layout)
         layout.addStretch(1)
 
     def update_proxy(self):
@@ -346,6 +347,7 @@ class WorkbenchMixin:
             return
         self.notified_update_version = release.version
         if self.tray.isVisible() and QSystemTrayIcon.supportsMessages():
+            self.update_notification_kind = "app"
             self.tray.showMessage(
                 "Обновление Nodera",
                 f"Доступна версия {release.version}. Нажмите, чтобы обновиться.",
@@ -654,7 +656,7 @@ class WorkbenchMixin:
 
     def schedule_location_check(self, profile=None):
         profile = profile or self.display_profile()
-        if self.closing or not profile:
+        if self.closing or not profile or not self.settings.geo_auto:
             return
         self.pending_geo_profiles[profile.id] = deepcopy(profile)
         if self.geo_task and self.geo_task.profile.id == profile.id:
@@ -746,6 +748,9 @@ class WorkbenchMixin:
             core_pid=self.core.process.pid if self.core.process and self.core.running else None,
         )
         self.geo_task = task
+        if hasattr(self, "geo_determine_button"):
+            self.geo_determine_button.setEnabled(False)
+            self.geo_tool_status.setText("Определение IP и геолокации маршрутов…")
         self.geo_cancel_button.setEnabled(True)
         self.geo_cancel_button.setVisible(True)
         self.server_result.setText("Проверка IP в фоне…")
@@ -782,6 +787,13 @@ class WorkbenchMixin:
             self.refresh_location_views()
             self.geo_cancel_button.setEnabled(False)
             self.geo_cancel_button.setVisible(False)
+            if hasattr(self, "geo_determine_button"):
+                self.geo_determine_button.setEnabled(bool(self.profile and not self.closing))
+                self.geo_tool_status.setText(
+                    "Определение завершено"
+                    if not task.cancelled.is_set()
+                    else "Определение остановлено"
+                )
             self.server_result.setText(
                 "Проверка IP завершена" if not task.cancelled.is_set() else "Проверка остановлена"
             )
@@ -1160,7 +1172,9 @@ class WorkbenchMixin:
             return
         settings, profile, running = self.settings, self.profile, self.core.running
         self.start_inspection(
-            "local", lambda: preflight(settings, profile, running), self.show_checks
+            "local",
+            lambda: preflight(settings, profile, running, root=self.store.root),
+            self.show_checks,
         )
 
     def diagnose_network(self):

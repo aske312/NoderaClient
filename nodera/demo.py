@@ -120,7 +120,7 @@ def prepare_demo(store):
                 )
         migrated.append(profile)
     changed = migrated != library.profiles
-    library = ProfileLibrary(migrated, library.active_id)
+    library = replace(library, profiles=migrated)
     existing = {p.id for p in library.profiles}
     additions = [p for p in fixtures.values() if p.id not in existing]
     if additions or changed:
@@ -128,6 +128,7 @@ def prepare_demo(store):
             ProfileLibrary(
                 [*library.profiles, *additions],
                 library.active_id or additions[0].id,
+                library.previous_profiles,
             )
         )
     if not (store.root / "settings.json").exists():

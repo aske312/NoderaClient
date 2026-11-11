@@ -156,6 +156,9 @@ class NavigationDock(QFrame):
         self.tools.setText(title)
         self.tools.setIcon(line_icon(icon))
         self.tools.setChecked(secondary)
+        self.layout().activate()
+        self.adjustSize()
+        self.updateGeometry()
 
     def toggle_palette(self):
         # The active state describes the page, independently of popup visibility.

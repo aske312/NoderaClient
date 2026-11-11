@@ -273,6 +273,7 @@ def test_refresh_passes_saved_pin_for_the_requested_profile(signer, monkeypatch)
         settings=SimpleNamespace(device_id="device"),
         library=ProfileLibrary([profile], profile.id),
         core=SimpleNamespace(_record=lambda *a: None),
+        core_manager=SimpleNamespace(version=lambda: "1.19.33"),
     )
     seen = []
     monkeypatch.setattr(

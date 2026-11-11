@@ -6,6 +6,7 @@ import socket
 
 from nodera.bundled_core import core_manifest, resolve_core
 from nodera.core import is_admin
+from nodera.core_updates import CoreUpdates
 from nodera.models import ClientError, Profile, Settings, visible_proxies
 from nodera.ports import choose_ports
 from nodera.profile_view import effective_tun
@@ -48,15 +49,23 @@ def ipv6_route_check(enabled):
     }
 
 
-def preflight(settings: Settings, profile: Profile | None, running: bool = False) -> list[dict]:
+def preflight(
+    settings: Settings, profile: Profile | None, running: bool = False, root=None
+) -> list[dict]:
     checks = []
 
     def add(title, state, detail):
         checks.append({"title": title, "state": state, "detail": detail})
 
     try:
-        resolve_core()
-        add("Ядро Mihomo", "ok", f"Встроенное {core_manifest()['version']}. Целостность проверена.")
+        if root is None:
+            resolve_core()
+            version = core_manifest()["version"]
+        else:
+            manager = CoreUpdates(root)
+            manager.resolve()
+            version = manager.version()
+        add("Ядро Mihomo", "ok", f"Mihomo {version}. Целостность проверена.")
     except ClientError as exc:
         add("Ядро Mihomo", "error", str(exc))
     if profile and profile.config.get("proxies"):

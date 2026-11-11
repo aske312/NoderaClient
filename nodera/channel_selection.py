@@ -22,6 +22,7 @@ from nodera.bundled_core import core_manifest
 from nodera.channel_policy import ChannelPolicy, channel_capabilities
 from nodera.client_location import physical_interface
 from nodera.core import Core
+from nodera.core_updates import CoreUpdates
 from nodera.device_info import windows_identity
 from nodera.models import ClientError, Profile, Settings, visible_proxies
 from nodera.subscription import MAX_CONFIG_BYTES, parse_config, validate_url
@@ -67,7 +68,7 @@ def command_url(url):
     return urlunsplit((parsed.scheme, parsed.netloc, path + "/commands/select-channels", "", ""))
 
 
-def command_headers(device_id):
+def command_headers(device_id, core_version=None):
     name, os_version = windows_identity()
     return {
         "Accept": "application/json",
@@ -79,12 +80,14 @@ def command_headers(device_id):
         "X-Client-Name": "Nodera",
         "X-Client-Version": __version__,
         "X-Core-Name": "mihomo",
-        "X-Core-Version": core_manifest()["version"].removeprefix("v"),
+        "X-Core-Version": core_version or core_manifest()["version"].removeprefix("v"),
     }
 
 
-def request_candidates(profile, device_id, require_udp=False, *, proxy=None, transport=None):
-    headers = command_headers(device_id)
+def request_candidates(
+    profile, device_id, require_udp=False, *, proxy=None, transport=None, core_version=None
+):
+    headers = command_headers(device_id, core_version)
     url = command_url(profile.url)
     started = time.monotonic()
     try:
@@ -448,7 +451,10 @@ def select_channels(
     cancel = cancel or Event()
     check_cancel(cancel)
     progress("Получение каналов от сервера…")
-    config, revision = request_candidates(profile, device_id, require_udp, proxy=proxy)
+    manager = CoreUpdates(Path(root).parent)
+    config, revision = request_candidates(
+        profile, device_id, require_udp, proxy=proxy, core_version=manager.version()
+    )
     check_cancel(cancel)
     try:
         _, _, interface = physical_interface(with_name=True)
@@ -479,7 +485,11 @@ def select_channels(
     rows = []
     Path(root).mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="channel-check-", dir=root) as temp:
-        core = Core(Path(temp) / "runtime", outbound_interface=interface)
+        core = Core(
+            Path(temp) / "runtime",
+            core_resolver=manager.resolve,
+            outbound_interface=interface,
+        )
         try:
             core.start(
                 replace(
@@ -555,6 +565,8 @@ def apply_selection(result, previous, library, store, core, connected):
     if result.profile.id != previous.id or time.time() - result.created_at > 1800:
         raise ClientError("Результат проверки устарел. Выполните подбор заново.")
     updated = library.upsert(result.profile, activate=False)
+    if previous.config != result.profile.config:
+        updated = updated.remember(previous)
     groups = None
     try:
         if connected:

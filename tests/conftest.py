@@ -77,6 +77,20 @@ def pytest_runtest_makereport(item, call):
 
 
 @pytest.fixture(autouse=True)
+def stable_test_network(monkeypatch):
+    from PySide6.QtNetwork import QNetworkInformation
+
+    monkeypatch.setattr("nodera.network_recovery.interface_signature", lambda: ((1, ("test",)),))
+    monkeypatch.setattr(QNetworkInformation, "loadDefaultBackend", lambda: False)
+
+
+@pytest.fixture(autouse=True)
+def offline_automatic_core_updates(monkeypatch):
+    monkeypatch.setattr("nodera.core_updates.check_release", lambda *a, **kw: None)
+    monkeypatch.setattr("nodera.geodata_updates.check_release", lambda *a, **kw: None)
+
+
+@pytest.fixture(autouse=True)
 def offline_automatic_client_location(monkeypatch):
     # Tests must never contact a public IP-location service through the UI timer.
     def unavailable():

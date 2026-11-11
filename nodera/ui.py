@@ -34,7 +34,9 @@ from PySide6.QtWidgets import (
 )
 
 from nodera.chrome import FramelessWindowMixin
+from nodera.component_tools import ComponentToolsMixin
 from nodera.core import Core, is_admin
+from nodera.core_updates_ui import CoreUpdatesMixin
 from nodera.dialogs import RouteDialog
 from nodera.elevation import launch_admin
 from nodera.flow_monitor import FlowMonitor
@@ -45,6 +47,7 @@ from nodera.locations import country
 from nodera.modals import QMessageBox
 from nodera.models import ClientError, visible_proxies
 from nodera.navigation import NavigationDock
+from nodera.network_recovery import NetworkRecoveryMixin
 from nodera.presentation import PresentationMixin
 from nodera.profile_view import effective_tun, policy_view
 from nodera.profile_view import format_bytes as size_text
@@ -77,7 +80,15 @@ class Task(QThread):
 
 
 class MainWindow(
-    FramelessWindowMixin, ProfilesMixin, WorkbenchMixin, PresentationMixin, FlowsMixin, QMainWindow
+    FramelessWindowMixin,
+    ProfilesMixin,
+    WorkbenchMixin,
+    CoreUpdatesMixin,
+    ComponentToolsMixin,
+    NetworkRecoveryMixin,
+    PresentationMixin,
+    FlowsMixin,
+    QMainWindow,
 ):
     shutdown_complete = Signal()
     channel_progress = Signal(str)
@@ -156,6 +167,7 @@ class MainWindow(
         self.embed_settings_tools()
         self.build_application()
         self.build_flows()
+        self.build_component_tools()
         self.navigate(0)
         self.refresh_profile()
         self.log(
@@ -187,13 +199,21 @@ class MainWindow(
             self.app_update_timer.setSingleShot(True)
             self.app_update_timer.timeout.connect(self.check_app_updates)
             self.app_update_timer.start(5000)
+            self.core_update_timer = QTimer(self)
+            self.core_update_timer.setSingleShot(True)
+            self.core_update_timer.timeout.connect(self.check_core_updates)
+            self.core_update_timer.start(12000)
+            self.geodata_update_timer = QTimer(self)
+            self.geodata_update_timer.setSingleShot(True)
+            self.geodata_update_timer.timeout.connect(self.check_geodata_updates)
+            self.geodata_update_timer.start(18000)
         QTimer.singleShot(1000, self.auto_update_profile)
         self.client_location_timer = QTimer(self)
         self.client_location_timer.setSingleShot(True)
         self.client_location_timer.timeout.connect(self.auto_client_location)
         self.client_location_timer.start(1500)
         self.tray = QSystemTrayIcon(self.windowIcon(), self)
-        self.tray.messageClicked.connect(self.show_update_offer)
+        self.tray.messageClicked.connect(self.show_update_notification)
         self.tray.setToolTip("Nodera · отключено")
         menu = QMenu(self)
         show = QAction("Открыть Nodera", self)
@@ -213,6 +233,7 @@ class MainWindow(
         )
         if QSystemTrayIcon.isSystemTrayAvailable():
             self.tray.show()
+        self.setup_network_recovery()
         self.refresh_controls()
         QApplication.instance().installEventFilter(self)
 
@@ -325,6 +346,15 @@ class MainWindow(
             self.toggle()
 
     def refresh_controls(self):
+        if hasattr(self, "geo_determine_button"):
+            self.geo_determine_button.setEnabled(
+                bool(self.profile and not self.closing and not self.geo_task)
+            )
+            self.geolocation_profile.setText(
+                "Подписка: " + self.profile.name
+                if self.profile
+                else "Добавьте подписку для определения маршрутов."
+            )
         if self.profile:
             self.library = self.library.upsert(self.profile)
         has_subscription = bool(self.library.profiles)
@@ -383,7 +413,7 @@ class MainWindow(
     def auto_client_location(self):
         from nodera.settings_ui import detect_point
 
-        if not self.closing and not self.settings.client_point:
+        if not self.closing and self.settings.geo_auto and not self.settings.client_point:
             detect_point(self, automatic=True)
 
     def refresh_profile(self):
@@ -809,7 +839,7 @@ class MainWindow(
 
     def test_server(self):
         member = self.current_node()
-        if self.task or not self.connected or not member:
+        if self.task or not self.connected or not member or "server-test" in self.inspections:
             return
         self.server_result.setText(f"Проверка HTTPS через «{member}»…")
 
@@ -831,13 +861,14 @@ class MainWindow(
                         node["delay"] = 0
             self.render_nodes()
 
-        self.run_task(lambda: self.core.delay(member), tested, failed)
+        self.start_inspection("server-test", lambda: self.core.delay(member), tested, failed)
 
     def toggle(self):
         self.power.setChecked(self.connected)
         if self.task or self.closing:
             return
         if self.connected:
+            self.cancel_network_recovery()
             self.state.setText("Отключение…")
             self.run_task(
                 lambda: self.core.stop("user disconnect"), lambda _: self.set_disconnected()
@@ -988,6 +1019,7 @@ class MainWindow(
         self.tray.setToolTip("Nodera · " + self.state.text())
 
         def checked(_):
+            self.cancel_network_recovery()
             self.record_network_result(True)
             self.network_checked_wall = time.time()
             self.network_state = "ok"
@@ -1013,6 +1045,7 @@ class MainWindow(
             self.log(message, "warning")
             self.recover_routes()
             self.test_group()
+            self.request_network_recovery("Ошибка проверки маршрута")
 
         self.start_inspection("connectivity", self.core.check_connectivity, checked, failed)
 
@@ -1060,6 +1093,8 @@ class MainWindow(
     def set_connected(self, version, verify=False):
         self.flow_monitor.clear()
         self.connected = True
+        self.running_core_version = str(version)
+        self.refresh_core_version()
         self.session_profile = deepcopy(self.profile)
         self.network_checks_enabled = verify
         self.route_recovery_at = float("-inf")
@@ -1099,11 +1134,14 @@ class MainWindow(
             QTimer.singleShot(0, self.periodic_delays)
 
     def set_disconnected(self):
+        self.cancel_network_recovery()
         self.flow_timer.stop()
         self.delay_results.clear()
         self.delay_status.setText("Задержка · Автопроверка после подключения, каждые 15 с")
         self.flow_monitor.clear()
         self.connected = False
+        self.running_core_version = ""
+        self.refresh_core_version()
         self.refresh_session_visibility()
         self.network_checked_wall = 0.0
         self.update_network_tag()
@@ -1172,8 +1210,9 @@ class MainWindow(
                     "Не удалось обновить соединения. Показаны последние полученные данные."
                 )
             if not self.core.running:
-                self.set_disconnected()
+                self.request_network_recovery("Ядро завершило работу")
             elif self.api_failures >= 3:
+                self.request_network_recovery("Нет ответа от API ядра")
                 self.state.setText("Нет связи с API ядра")
                 self.navigation_status.setText("Нет связи")
                 self.tray.setToolTip("Nodera · " + self.state.text())

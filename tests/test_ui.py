@@ -58,7 +58,17 @@ def test_tools_are_inside_settings_and_map_fills_home(tmp_path):
     window.timer.stop()
     window.show()
     app.processEvents()
-    assert set(window.nav) == {0, 1, 2, 4, 6, 7, 8}
+    assert set(window.nav) == {
+        0,
+        1,
+        2,
+        4,
+        6,
+        7,
+        8,
+        window.geodata_page_index,
+        window.geolocation_page_index,
+    }
     assert window.settings_tabs.indexOf(window.events_section) >= 0
     assert window.settings_tabs.indexOf(window.diagnostics_section) >= 0
     for width, height in ((940, 660), (1100, 760)):
@@ -196,7 +206,11 @@ def test_server_controls_selection_and_health_check(tmp_path, monkeypatch):
     assert Store(tmp_path).load_profile().selections == {"Manual": "B"}
     monkeypatch.setattr(window.core, "delay", lambda member: 73)
     window.test_server()
-    wait_task(window, app)
+    deadline = time.monotonic() + 3
+    while "server-test" in window.inspections and time.monotonic() < deadline:
+        app.processEvents()
+        QTest.qWait(5)
+    assert not window.task and "server-test" not in window.inspections
     assert "73 мс" in window.server_result.text()
     assert "Доступен" in window.server_result.text()
     window.close()

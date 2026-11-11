@@ -34,8 +34,13 @@ def bundled_geodata():
     return Path(__file__).resolve().parents[1] / "vendor/geodata"
 
 
-def prepare_session_geodata(destination):
+def prepare_session_geodata(destination, root=None):
     try:
+        if root is not None:
+            from nodera.geodata_updates import GeodataUpdates
+
+            if GeodataUpdates(root).prepare(destination):
+                return
         for item in geodata_manifest():
             source = bundled_geodata() / item["filename"]
             if not source.is_file() or sha256(source) != item["sha256"]:

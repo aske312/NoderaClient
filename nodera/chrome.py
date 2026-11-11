@@ -243,6 +243,8 @@ class ShellSurface(QFrame):
 
 class FramelessWindowMixin:
     def nativeEvent(self, event_type, message):
+        if os.name == "nt" and hasattr(self, "network_watcher"):
+            self.network_watcher.native_message(message)
         if os.name == "nt" and native_work_area(
             message, self.minimumSize(), self.devicePixelRatioF()
         ):

@@ -123,6 +123,7 @@ def test_subscription_detail_updates_and_search_does_not_change_active_profile(t
 
 def test_real_connection_automatically_checks_all_routes_even_above_64(tmp_path, monkeypatch):
     app, window = make_window(tmp_path, count=70)
+    window.settings = replace(window.settings, geo_auto=True)
     monkeypatch.setattr("nodera.geolocation.GeoClient.check_node", fake_location)
     window.schedule_location_check = MethodType(schedule_locations, window)
     monkeypatch.setattr(window, "check_connection", lambda: None)
@@ -140,6 +141,7 @@ def test_real_connection_automatically_checks_all_routes_even_above_64(tmp_path,
 
 def test_subscription_update_automatically_refreshes_ip_without_connection(tmp_path, monkeypatch):
     app, window = make_window(tmp_path)
+    window.settings = replace(window.settings, geo_auto=True)
     monkeypatch.setattr("nodera.geolocation.GeoClient.check_node", fake_location)
     window.schedule_location_check = MethodType(schedule_locations, window)
     fetched = Profile(
@@ -161,6 +163,7 @@ def test_subscription_update_automatically_refreshes_ip_without_connection(tmp_p
 
 def test_updated_profile_replaces_an_inflight_ip_check(tmp_path, monkeypatch):
     app, window = make_window(tmp_path, count=1)
+    window.settings = replace(window.settings, geo_auto=True)
     entered, release = threading.Event(), threading.Event()
     hosts = []
 

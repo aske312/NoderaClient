@@ -127,6 +127,8 @@ class DemoChannelService:
 
     def apply_selection(self, result, previous, library, store, core, connected):
         updated = library.upsert(result.profile, activate=False)
+        if previous.config != result.profile.config:
+            updated = updated.remember(previous)
         groups = core.apply_profile(result.profile) if connected else None
         store.save_library(updated)
         return updated, groups
