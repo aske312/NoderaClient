@@ -30,7 +30,7 @@ from nodera.models import ClientError, Profile, Settings, visible_proxies
 from nodera.ports import choose_ports, listener_owners
 from nodera.profile_view import effective_tun
 from nodera.provider_cache import RuleCache
-from nodera.route_health import RouteHealth, probe_name, quarantine_config
+from nodera.route_health import RouteHealth
 from nodera.storage import atomic_write
 from nodera.system_proxy import SystemProxy
 from nodera.tun_address import choose_tun_range, ipv4_assignments
@@ -747,7 +747,7 @@ class Core:
         health = self.route_health
         frozen = member in health.frozen
         with Controller(self.port, self.secret) as controller:
-            delay = controller.delay(probe_name(member) if frozen else member)
+            delay = controller.delay(member)
         if frozen:
             self.update_route_health(
                 {member: {"value": delay, "checked_at": time.time()}}, expected=health
@@ -756,66 +756,26 @@ class Core:
 
     @serialized
     def probe_aliases(self):
-        return {name: probe_name(name) for name in self.route_health.frozen}
+        return {}
 
     def update_route_health(self, values, *, expected=None):
         with self._operation_lock:
             if not self.running or expected is not None and expected is not self.route_health:
                 return
-            previous = copy.deepcopy(self.route_health)
+            previous = set(self.route_health.frozen)
             self.route_health.update(values, time.monotonic())
-            if set(previous.frozen) == set(self.route_health.frozen):
-                self.frozen_routes = dict(self.route_health.frozen)
-                return
-            try:
-                self._reload_quarantine(previous)
-            except Exception:
-                self.route_health = previous
-                raise
             self.frozen_routes = dict(self.route_health.frozen)
+            if previous == set(self.route_health.frozen):
+                return
             self._record(f"event=route_quarantine_changed count={len(self.route_health.frozen)}")
-        # Config replacement is serialized; external health checks are not.
+        # UI probes use a single external destination, so a failure is not proof
+        # that all traffic through a node is broken. Never replace outbounds with
+        # REJECT or reload the whole core here: that resets DNS and transports on
+        # healthy routes too. Mihomo's group health checks own automatic failover.
         try:
             self.recheck_routes()
         except ClientError:
             self._record("event=route_quarantine_healthcheck_failed", "warning")
-
-    def _reload_quarantine(self, previous):
-        before = quarantine_config(self._base_config, previous.frozen)
-        after = quarantine_config(self._base_config, self.route_health.frozen)
-        with Controller(self.port, self.secret) as controller:
-            current = controller.request("GET", "/configs")
-            for config in (before, after):
-                config["mode"] = current.get("mode", self._policy_mode)
-                config["log-level"] = current.get("log-level", config["log-level"])
-            choices = {
-                name: item.get("now")
-                for name, item in controller.proxies().items()
-                if item.get("type") == "Selector" and isinstance(item.get("now"), str)
-            }
-            try:
-                controller.request(
-                    "PUT",
-                    "/configs",
-                    params={"force": "true"},
-                    json={"payload": yaml.safe_dump(after, allow_unicode=True)},
-                    timeout=25,
-                )
-            except ClientError:
-                self.route_health = previous
-                controller.request(
-                    "PUT",
-                    "/configs",
-                    params={"force": "true"},
-                    json={"payload": yaml.safe_dump(before, allow_unicode=True)},
-                    timeout=25,
-                )
-                raise
-            for name, member in choices.items():
-                try:
-                    controller.select(name, member)
-                except ClientError:
-                    pass
 
     def recovery_status(self):
         """Read-only local readiness check, independent of remote route health."""
@@ -846,7 +806,7 @@ class Core:
         """Replace routing in the live process, retaining listeners and TUN identity."""
         if not self.running or self.runtime is None:
             raise ClientError("Подключение завершилось до применения подписки.")
-        before = quarantine_config(self._base_config, self.route_health.frozen)
+        before = copy.deepcopy(self._base_config)
         config = runtime_config(
             profile.config, self._session_settings, self.port, self.secret, profile.local_rules
         )

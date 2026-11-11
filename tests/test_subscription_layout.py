@@ -391,7 +391,7 @@ def test_applications_keep_updating_during_delay_checks_on_other_screens(tmp_pat
     app, window = make_window(tmp_path)
     entered, release = threading.Event(), threading.Event()
     monkeypatch.setattr(type(window.core), "running", property(lambda _: True))
-    monkeypatch.setattr(window.core, "update_route_health", lambda _: None)
+    monkeypatch.setattr(window.core, "update_route_health", lambda _, **kwargs: None)
     monkeypatch.setattr(
         window.core,
         "connection_snapshot",

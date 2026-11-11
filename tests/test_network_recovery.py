@@ -350,7 +350,6 @@ def test_background_remote_probe_does_not_lock_manual_selection(tmp_path, monkey
         def callback():
             return core.delay("a")
     else:
-        monkeypatch.setattr(core, "_reload_quarantine", lambda _: None)
         samples = {"a": {"value": 0}, "b": {"value": 10}}
         core.update_route_health(samples)
         core.update_route_health(samples)

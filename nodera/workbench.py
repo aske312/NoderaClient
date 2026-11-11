@@ -824,6 +824,8 @@ class WorkbenchMixin:
         port, secret = self.core.port, self.core.secret
         profile_id = self.profile.id
         generation = self.session_generation
+        core = self.core
+        health = core.route_health
         self.delay_status.setText(f"Проверка всех маршрутов: {len(names)}…")
 
         def checked(values):
@@ -845,14 +847,17 @@ class WorkbenchMixin:
             self.log(message, "warning")
 
         def check():
-            aliases = self.core.probe_aliases()
+            aliases = core.probe_aliases()
 
             def cancelled():
                 return self.closing or generation != self.session_generation
 
             values = probe_delays(port, secret, names, cancelled, aliases)
             if not cancelled():
-                self.core.update_route_health(values)
+                if getattr(core, "demo", False):
+                    core.update_route_health(values)
+                else:
+                    core.update_route_health(values, expected=health)
             return values
 
         self.start_inspection(

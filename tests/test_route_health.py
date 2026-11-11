@@ -1,13 +1,17 @@
 import os
+import socket
+import socketserver
+import struct
 import threading
 from http.server import BaseHTTPRequestHandler
 
+import httpx
 import pytest
 
 from nodera.bundled_core import bundled_location
 from nodera.core import Core
 from nodera.models import ClientError, Profile, Settings
-from nodera.route_health import RouteHealth, probe_name, quarantine_config
+from nodera.route_health import RouteHealth
 from tests.loopback import ThreadingHTTPServer
 
 
@@ -67,36 +71,149 @@ def test_success_before_next_probe_time_recovers_last_healthy_route_during_outag
     assert not health.frozen and not health.failures
 
 
-def test_quarantine_blocks_outbound_but_retains_isolated_probe_and_does_not_mutate_source():
-    source = {
-        "proxies": [{"name": "a", "type": "http", "server": "127.0.0.1", "port": 1}],
-        "proxy-groups": [{"name": "auto", "type": "fallback", "include-all": True}],
-    }
-    updated = quarantine_config(source, {"a"})
-    assert source["proxies"][0]["type"] == "http"
-    assert updated["proxies"][0] == {"name": "a", "type": "reject"}
-    assert updated["proxies"][1]["name"] == probe_name("a")
-    assert updated["proxy-groups"][0]["exclude-filter"]
-    assert quarantine_config(source, {}) == source
-
-
-def test_failed_apply_does_not_publish_unenforced_freeze(tmp_path, monkeypatch):
+def test_health_changes_never_reload_configuration_or_replace_outbounds(tmp_path, monkeypatch):
     core = Core(tmp_path)
     monkeypatch.setattr(type(core), "running", property(lambda _: True))
+    calls = []
 
-    def fail(previous):
-        raise ClientError("reload failed")
+    class Api:
+        def __init__(self, *args):
+            pass
 
-    monkeypatch.setattr(core, "_reload_quarantine", fail)
-    core.update_route_health(samples())
-    core.update_route_health(samples())
-    with pytest.raises(ClientError):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def recheck_routes(self, *args):
+            calls.append("group-check")
+            raise ClientError("temporary probe failure")
+
+        def request(self, *args, **kwargs):
+            pytest.fail("Health observations must not mutate core configuration")
+
+    monkeypatch.setattr("nodera.core.Controller", Api)
+    for _ in range(3):
         core.update_route_health(samples())
-    assert core.route_health.frozen == core.frozen_routes == {}
+    assert "a" in core.frozen_routes
+    assert core.probe_aliases() == {}
+    core.update_route_health(samples(10))
+    assert not core.frozen_routes
+    assert calls == ["group-check", "group-check"]
+
+
+def test_forced_route_is_not_disrupted_by_failed_background_probe(tmp_path, monkeypatch):
+    core = Core(tmp_path)
+    monkeypatch.setattr(type(core), "running", property(lambda _: True))
+    core.forced_server = "a"
+    monkeypatch.setattr(
+        "nodera.core.Controller", lambda *a: pytest.fail("Pinned route must stay untouched")
+    )
+    for _ in range(3):
+        core.update_route_health(samples())
+    assert core.forced_server == "a"
+    assert "a" in core.frozen_routes
+
+
+def test_old_health_batch_cannot_affect_reloaded_session(tmp_path, monkeypatch):
+    core = Core(tmp_path)
+    monkeypatch.setattr(type(core), "running", property(lambda _: True))
+    old = core.route_health
+    core.route_health = RouteHealth()
+    for _ in range(3):
+        core.update_route_health(samples(), expected=old)
+    assert not core.route_health.failures and not core.frozen_routes
 
 
 @pytest.mark.skipif(os.name != "nt" or not bundled_location().is_file(), reason="Windows core")
-def test_real_core_quarantine_failover_probe_and_recovery(tmp_path, monkeypatch):
+def test_health_flapping_preserves_live_dns_cache_and_healthy_requests(tmp_path):
+    class DNS(socketserver.BaseRequestHandler):
+        def handle(self):
+            query, stream = self.request
+            cursor = 12
+            while query[cursor]:
+                cursor += query[cursor] + 1
+            question = query[12 : cursor + 5]
+            kind = struct.unpack("!H", query[cursor + 1 : cursor + 3])[0]
+            self.server.queries += 1
+            answer = kind == 1
+            header = query[:2] + struct.pack("!5H", 0x8180, 1, int(answer), 0, 0)
+            body = (
+                b"\xc0\x0c" + struct.pack("!HHIH", 1, 1, 600, 4) + socket.inet_aton("127.0.0.1")
+                if answer
+                else b""
+            )
+            stream.sendto(header + question + body, self.client_address)
+
+    class HTTP(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(204)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    resolver = socketserver.ThreadingUDPServer(("127.0.0.1", 0), DNS)
+    resolver.daemon_threads = True
+    resolver.queries = 0
+    origin = ThreadingHTTPServer(("127.0.0.1", 0), HTTP)
+    threads = [threading.Thread(target=s.serve_forever, daemon=True) for s in (resolver, origin)]
+    for thread in threads:
+        thread.start()
+    core = Core(tmp_path / "runtime")
+    address = f"127.0.0.1:{resolver.server_address[1]}"
+    profile = Profile(
+        "health flapping",
+        "",
+        {
+            "ipv6": False,
+            "dns": {
+                "enable": True,
+                "ipv6": False,
+                "enhanced-mode": "redir-host",
+                "nameserver": [address],
+                "default-nameserver": [address],
+            },
+            "proxies": [
+                {"name": "a", "type": "http", "server": "127.0.0.1", "port": 1},
+                {"name": "b", "type": "direct"},
+            ],
+            "rules": ["MATCH,b"],
+        },
+        "",
+    )
+    try:
+        core.start(profile, Settings(tun=False, system_proxy=False))
+        pid = core.process.pid
+        with httpx.Client(
+            proxy=f"http://127.0.0.1:{core.mixed_port}", trust_env=False, timeout=5
+        ) as client:
+            url = f"http://health-cache.test:{origin.server_port}/"
+            assert client.get(url).status_code == 204
+            queries = resolver.queries
+            assert queries > 0
+            for _ in range(3):
+                for _ in range(3):
+                    core.update_route_health(samples())
+                assert "a" in core.frozen_routes
+                assert client.get(url).status_code == 204
+                core.update_route_health(samples(10))
+                assert not core.frozen_routes
+                assert client.get(url).status_code == 204
+            assert resolver.queries == queries, "Health flapping discarded the live DNS cache"
+            assert core.process.pid == pid
+    finally:
+        core.stop()
+        for server in (resolver, origin):
+            server.shutdown()
+            server.server_close()
+        for thread in threads:
+            thread.join(2)
+
+
+@pytest.mark.skipif(os.name != "nt" or not bundled_location().is_file(), reason="Windows core")
+def test_real_core_health_failover_and_recovery_without_config_reload(tmp_path, monkeypatch):
     enabled = threading.Event()
 
     class Handler(BaseHTTPRequestHandler):
@@ -153,6 +270,7 @@ def test_real_core_quarantine_failover_probe_and_recovery(tmp_path, monkeypatch)
         with pytest.raises(ClientError):
             core.delay("a")
         assert core.delay("b") > 0
+        pid = core.process.pid
         core.update_route_health(samples())
         assert not core.frozen_routes
         core.update_route_health(samples())
@@ -162,16 +280,26 @@ def test_real_core_quarantine_failover_probe_and_recovery(tmp_path, monkeypatch)
         group = core.groups()[0]
         assert group["current"] == "b"
         assert [member["name"] for member in group["members"]] == ["a", "b"]
-        assert group["members"][0]["type"] == "Reject"
+        assert group["members"][0]["type"] == "Http"
         with pytest.raises(ClientError, match="заморожен"):
             core.force_server("a")
         core.check_connectivity()
+        assert core.process.pid == pid
+        # Reloading logs a new initial configuration/provider set. Freeze and
+        # recovery must leave the running DNS resolver and transports intact.
+        trace = core.trace.path.read_text(encoding="utf-8")
+        assert trace.count("Initial configuration complete") == 1
         enabled.set()
-        assert core.delay("a") > 0  # probes the original, while normal outbound is Reject
+        assert core.delay("a") > 0  # the original outbound remains available to probes
         assert not core.frozen_routes
         assert core.groups()[0]["members"][0]["type"] == "Http"
         core.force_server("a")
         core.check_connectivity()
+        assert core.process.pid == pid
+        # Reloading logs a new initial configuration/provider set. Freeze and
+        # recovery must leave the running DNS resolver and transports intact.
+        trace = core.trace.path.read_text(encoding="utf-8")
+        assert trace.count("Initial configuration complete") == 1
     finally:
         core.stop()
         server.shutdown()
