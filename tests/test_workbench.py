@@ -32,7 +32,7 @@ def test_app_update_download_and_installer_wait_for_user_without_closing_client(
     window = MainWindow(Store(tmp_path), Settings(update_hours=0), None)
     window.timer.stop()
     release = Release("1.2.3", "https://github.com/test", "a" * 64, 9)
-    window.available_release = release
+    window.available_updates["app"] = release
     window.connected = connected
     calls = []
 
@@ -45,17 +45,17 @@ def test_app_update_download_and_installer_wait_for_user_without_closing_client(
         assert downloaded == release and resume == connected
         calls.append("launch")
 
-    monkeypatch.setattr("nodera.workbench.updater.download_release", download)
-    monkeypatch.setattr("nodera.workbench.updater.launch_installer", launch)
+    monkeypatch.setattr("nodera.updater.download_release", download)
+    monkeypatch.setattr("nodera.updater.launch_installer", launch)
     monkeypatch.setattr(window, "exit_app", lambda: calls.append("exit"))
     try:
-        window.install_app_update()
+        window.apply_updates()
         assert window.task is None
         wait(app, lambda: not window.inspections)
         assert calls == ["download"]
         assert window.downloaded_update == tmp_path / "installer.exe"
-        assert window.app_update_install.text() == "Установить обновление"
-        window.install_app_update()
+        assert window.update_apply.text() == "Установить Nodera"
+        window.apply_updates()
         assert calls == ["download", "launch"]
         assert not window.closing and window.connected == connected
     finally:
@@ -68,24 +68,24 @@ def test_failed_update_launch_keeps_client_open_and_allows_retry(tmp_path, monke
     app = QApplication.instance() or QApplication([])
     window = MainWindow(Store(tmp_path), Settings(update_hours=0), None)
     window.timer.stop()
-    window.available_release = Release("1.2.3", "https://github.com/test", "a" * 64, 9)
+    window.available_updates["app"] = Release("1.2.3", "https://github.com/test", "a" * 64, 9)
     monkeypatch.setattr(
-        "nodera.workbench.updater.download_release", lambda *a, **kw: tmp_path / "installer.exe"
+        "nodera.updater.download_release", lambda *a, **kw: tmp_path / "installer.exe"
     )
 
     def failed(*args, **kwargs):
         raise ClientError("Installer failed")
 
-    monkeypatch.setattr("nodera.workbench.updater.launch_installer", failed)
+    monkeypatch.setattr("nodera.updater.launch_installer", failed)
     monkeypatch.setattr(window, "exit_app", lambda: pytest.fail("Failed update closed the client"))
     try:
-        window.install_app_update()
+        window.apply_updates()
         wait(app, lambda: not window.inspections)
-        window.install_app_update()
+        window.apply_updates()
         assert not window.closing
         assert window.downloaded_update is None
-        assert window.app_update_check.isEnabled() and window.app_update_install.isEnabled()
-        assert window.app_update_status.text() == "Installer failed"
+        assert window.update_check.isEnabled() and window.update_apply.isEnabled()
+        assert window.update_status.text() == "Installer failed"
     finally:
         window.close()
         app.processEvents()
@@ -95,7 +95,7 @@ def test_background_download_survives_connection_change_and_blocks_duplicate(tmp
     app = QApplication.instance() or QApplication([])
     window = MainWindow(Store(tmp_path), Settings(update_hours=0, geo_auto=False), None)
     window.timer.stop()
-    window.available_release = Release("1.2.3", "https://github.com/test", "a" * 64, 9)
+    window.available_updates["app"] = Release("1.2.3", "https://github.com/test", "a" * 64, 9)
     entered, release = threading.Event(), threading.Event()
     calls = []
 
@@ -105,15 +105,15 @@ def test_background_download_survives_connection_change_and_blocks_duplicate(tmp
         assert release.wait(3)
         return tmp_path / "installer.exe"
 
-    monkeypatch.setattr("nodera.workbench.updater.download_release", download)
+    monkeypatch.setattr("nodera.updater.download_release", download)
     try:
-        window.install_app_update()
+        window.apply_updates()
         wait(app, entered.is_set)
         assert window.task is None
         window.session_generation += 1
-        window.install_app_update()
-        window.check_app_updates()
-        assert window.available_release is not None
+        window.apply_updates()
+        window.check_updates(automatic=True)
+        assert "app" in window.available_updates
         release.set()
         wait(app, lambda: not window.inspections)
         assert calls == [True]
@@ -131,8 +131,8 @@ def test_automatic_update_retries_busy_startup_and_network_failure(tmp_path, mon
     app = QApplication.instance() or QApplication([])
     window = MainWindow(Store(tmp_path), Settings(update_hours=0, geo_auto=False), None)
     window.timer.stop()
-    window.app_update_timer = QTimer(window)
-    window.app_update_timer.setSingleShot(True)
+    window.update_timer = QTimer(window)
+    window.update_timer.setSingleShot(True)
     calls = []
 
     def check(**kwargs):
@@ -141,20 +141,20 @@ def test_automatic_update_retries_busy_startup_and_network_failure(tmp_path, mon
             raise ClientError("Offline")
         return None
 
-    monkeypatch.setattr("nodera.workbench.updater.check_release", check)
+    monkeypatch.setattr("nodera.updater.check_release", check)
     try:
         window.task = object()
-        window.check_app_updates()
-        assert not calls and window.app_update_timer.interval() == 60000
+        window.check_updates(automatic=True)
+        assert not calls and window.update_timer.interval() == 60000
         window.task = None
-        window.check_app_updates()
+        window.check_updates(automatic=True)
         wait(app, lambda: not window.inspections)
-        assert window.app_update_timer.interval() == 30 * 60 * 1000
-        assert window.app_update_status.text() == "Offline"
-        window.check_app_updates()
+        assert window.update_timer.interval() == 30 * 60 * 1000
+        assert window.update_status.text() == "Nodera · Offline"
+        window.check_updates(automatic=True)
         wait(app, lambda: not window.inspections)
-        assert window.app_update_timer.interval() == 6 * 60 * 60 * 1000
-        assert "актуальная" in window.app_update_status.text()
+        assert window.update_timer.interval() == 6 * 60 * 60 * 1000
+        assert "актуальны" in window.update_status.text()
     finally:
         window.task = None
         window.close()
@@ -175,14 +175,14 @@ def test_update_offer_notifies_once_and_requires_action_before_download(tmp_path
     monkeypatch.setattr(window.tray, "isVisible", lambda: True)
     monkeypatch.setattr(QSystemTrayIcon, "supportsMessages", lambda: True)
     monkeypatch.setattr(window.tray, "showMessage", lambda *args: notices.append(args))
-    monkeypatch.setattr(window, "install_app_update", lambda: downloads.append(True))
+    monkeypatch.setattr(window, "apply_updates", lambda: downloads.append(True))
     release = Release("9.0.0", "https://github.com/test", "a" * 64, 9)
-    monkeypatch.setattr("nodera.workbench.updater.check_release", lambda **kwargs: release)
+    monkeypatch.setattr("nodera.updater.check_release", lambda **kwargs: release)
     try:
-        window.check_app_updates()
+        window.check_updates(automatic=True)
         wait(app, lambda: not window.inspections)
         assert len(notices) == 1 and not downloads
-        window.check_app_updates()
+        window.check_updates(automatic=True)
         wait(app, lambda: not window.inspections)
         assert len(notices) == 1
         window.show_update_offer()
@@ -201,6 +201,51 @@ def test_update_offer_notifies_once_and_requires_action_before_download(tmp_path
         window.quit_requested = True
         window.close()
         app.processEvents()
+
+
+def test_one_update_action_handles_all_sources_and_keeps_partial_failures_retryable(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+
+    app = QApplication.instance()
+    window = MainWindow(Store(tmp_path), Settings(update_hours=0), None)
+    window.timer.stop()
+    app_release = Release("9.0.0", "https://github.com/test", "a" * 64, 9)
+    core_release = SimpleNamespace(version="1.19.34")
+    databases = SimpleNamespace(version="2026-11-19")
+    calls = []
+
+    monkeypatch.setattr("nodera.updater.check_release", lambda **kw: app_release)
+    monkeypatch.setattr("nodera.core_updates.check_release", lambda *a, **kw: core_release)
+    monkeypatch.setattr("nodera.geodata_updates.check_release", lambda *a, **kw: databases)
+
+    def missing_core(*args, **kwargs):
+        calls.append("core")
+        raise ClientError("Timeout")
+
+    monkeypatch.setattr(window.core_manager, "download", missing_core)
+    monkeypatch.setattr(window.geodata_manager, "download", lambda *a, **kw: databases)
+    monkeypatch.setattr(window.geodata_manager, "activate", lambda _: calls.append("geodata"))
+    monkeypatch.setattr(
+        "nodera.updater.download_release", lambda *a, **kw: calls.append("app") or tmp_path / "app"
+    )
+    monkeypatch.setattr("nodera.updater.launch_installer", lambda *a, **kw: calls.append("launch"))
+    window.check_updates()
+    wait(app, lambda: not window.inspections)
+    assert not calls
+    assert set(window.available_updates) == {"app", "core", "geodata"}
+    assert all(
+        version in window.update_status.text() for version in ("9.0.0", "1.19.34", "2026-11-19")
+    )
+    window.apply_updates()
+    wait(app, lambda: not window.inspections)
+    assert calls == ["core", "geodata", "app"]
+    assert set(window.available_updates) == {"app", "core"}
+    assert "Timeout" in window.update_status.text()
+    assert window.update_apply.text() == "Установить Nodera"
+    window.apply_updates()
+    assert calls[-1] == "launch"
 
 
 def test_background_poll_preserves_selection_and_does_not_lock_controls(tmp_path, monkeypatch):

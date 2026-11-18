@@ -130,9 +130,12 @@ class GeodataUpdates:
                 continue
         return None
 
-    def identity(self):
-        entry = self.selected()
-        return validate_entry(entry) if entry else fingerprint(geodata_manifest())
+    def identity(self, *, verify=True):
+        entry = self.selected() if verify else self.state().get("active")
+        try:
+            return validate_entry(entry)
+        except (ValueError, KeyError, TypeError):
+            return fingerprint(geodata_manifest())
 
     def version(self):
         entry = self.selected()

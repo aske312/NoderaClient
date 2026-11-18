@@ -2,8 +2,6 @@
 
 import json
 import re
-import time
-from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime
 
@@ -24,7 +22,6 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPlainTextEdit,
-    QProgressBar,
     QPushButton,
     QSizePolicy,
     QTableWidget,
@@ -34,7 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from nodera import __version__, autostart, updater
+from nodera import __version__, autostart
 from nodera.bundled_core import core_manifest
 from nodera.controller import Controller
 from nodera.controls import ComboBox as QComboBox
@@ -42,7 +39,7 @@ from nodera.controls import SubscriptionSelector
 from nodera.delay_probe import probe_delays
 from nodera.device_info import windows_identity
 from nodera.diagnostics import ipv6_route_check, preflight
-from nodera.geolocation import endpoint_rows
+from nodera.geolocation import GeoClient, endpoint_rows
 from nodera.journal import compact_entries, format_entry, profile_secrets, useful_event
 from nodera.locations import country
 from nodera.models import ClientError, visible_proxies
@@ -238,41 +235,7 @@ class WorkbenchMixin:
         self.application_copy_info = copy_info
         content.addWidget(copy_info, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(panel)
-        updates_panel = QFrame()
-        updates_panel.setObjectName("applicationUpdates")
-        updates_panel.setMaximumWidth(780)
-        update_content = QVBoxLayout(updates_panel)
-        update_content.setContentsMargins(16, 14, 16, 14)
-        update_content.setSpacing(8)
-        self.available_release = None
-        self.downloaded_update = None
-        self.app_update_status = wrapping_label("Проверить наличие обновлений", "muted")
-        updates = QHBoxLayout()
-        updates.setSpacing(16)
-        update_text = QVBoxLayout()
-        update_text.setSpacing(4)
-        update_text.addWidget(label("Обновления", "profileName"))
-        update_text.addWidget(self.app_update_status)
-        updates.addLayout(update_text, 1)
-        self.app_update_check = QPushButton("Проверить")
-        self.app_update_check.setObjectName("primary")
-        self.app_update_check.clicked.connect(self.check_app_updates)
-        self.app_update_install = QPushButton("Загрузить обновление")
-        self.app_update_install.setObjectName("primary")
-        self.app_update_install.hide()
-        self.app_update_install.clicked.connect(self.install_app_update)
-        updates.addWidget(self.app_update_check)
-        updates.addWidget(self.app_update_install)
-        update_content.addLayout(updates)
-        self.app_update_progress = QProgressBar()
-        self.app_update_progress.setObjectName("aboutProgress")
-        self.app_update_progress.setRange(0, 0)
-        self.app_update_progress.setTextVisible(False)
-        self.app_update_progress.setFixedHeight(3)
-        self.app_update_progress.hide()
-        update_content.addWidget(self.app_update_progress)
-        layout.addWidget(updates_panel)
-        self.build_core_updates(layout)
+        self.build_updates(layout)
         layout.addStretch(1)
 
     def update_proxy(self):
@@ -280,167 +243,6 @@ class WorkbenchMixin:
             f"http://127.0.0.1:{self.core.mixed_port}"
             if self.connected and self.core.mixed_port
             else None
-        )
-
-    def schedule_app_update_check(self, milliseconds):
-        timer = getattr(self, "app_update_timer", None)
-        if timer is not None and not self.closing:
-            timer.start(milliseconds)
-
-    def check_app_updates(self):
-        if self.closing:
-            return
-        if self.task or {"app-update", "app-download"}.intersection(self.inspections):
-            self.schedule_app_update_check(60000)
-            return
-        previous_release = self.available_release
-        previous_download = self.downloaded_update
-        self.app_update_install.setText("Загрузить обновление")
-        self.app_update_install.hide()
-        self.app_update_check.show()
-        self.app_update_progress.show()
-        self.app_update_check.setEnabled(False)
-        self.app_update_install.setEnabled(False)
-        self.app_update_status.setText("Проверка GitHub…")
-        proxy = self.update_proxy()
-
-        def checked(release):
-            self.app_update_progress.hide()
-            self.app_update_check.setVisible(release is None)
-            self.schedule_app_update_check(6 * 60 * 60 * 1000)
-            self.available_release = release
-            self.downloaded_update = previous_download if release == previous_release else None
-            self.app_update_install.setText(
-                "Установить обновление" if self.downloaded_update else "Загрузить обновление"
-            )
-            self.app_update_check.setEnabled(True)
-            self.app_update_install.setEnabled(True)
-            self.app_update_install.setVisible(release is not None)
-            self.app_update_status.setText(
-                f"Доступна версия {release.version}"
-                if release
-                else f"Установлена актуальная версия {__version__}"
-            )
-            if release:
-                self.notify_app_update(release)
-
-        def failed(message):
-            self.app_update_progress.hide()
-            self.schedule_app_update_check(30 * 60 * 1000)
-            self.app_update_check.setEnabled(True)
-            self.app_update_install.setEnabled(self.available_release is not None)
-            self.app_update_install.setVisible(self.available_release is not None)
-            self.app_update_status.setText(message)
-
-        self.start_inspection(
-            "app-update",
-            lambda: updater.check_release(proxy=proxy),
-            checked,
-            failed,
-            session_bound=False,
-        )
-
-    def notify_app_update(self, release):
-        from PySide6.QtWidgets import QSystemTrayIcon
-
-        if release.version == getattr(self, "notified_update_version", None):
-            return
-        self.notified_update_version = release.version
-        if self.tray.isVisible() and QSystemTrayIcon.supportsMessages():
-            self.update_notification_kind = "app"
-            self.tray.showMessage(
-                "Обновление Nodera",
-                f"Доступна версия {release.version}. Нажмите, чтобы обновиться.",
-                QSystemTrayIcon.MessageIcon.Information,
-                10000,
-            )
-        if self.isVisible():
-            self.show_update_offer()
-
-    def show_update_offer(self):
-        from nodera.modals import MessageDialog
-
-        if self.closing or not self.available_release:
-            return
-        existing = getattr(self, "update_offer", None)
-        if existing is not None and existing.isVisible():
-            existing.raise_()
-            existing.activateWindow()
-            return
-        if QApplication.activeModalWidget() is not None:
-            QTimer.singleShot(3000, self.show_update_offer)
-            return
-        self.reveal()
-        dialog = MessageDialog(
-            self,
-            "Доступно обновление",
-            f"Nodera {self.available_release.version}\nУстановлена версия {__version__}.\nПодписки и настройки сохранятся.",
-            "Установить" if self.downloaded_update else "Загрузить",
-            cancel=True,
-        )
-        dialog.cancel_button.setText("Позже")
-        dialog.accepted.connect(self.accept_update_offer)
-        self.update_offer = dialog
-        dialog.open()
-
-    def accept_update_offer(self):
-        self.navigate(self.stack.indexOf(self.application_page))
-        self.install_app_update()
-
-    def install_app_update(self):
-        if (
-            self.task
-            or self.closing
-            or not self.available_release
-            or {"app-update", "app-download"}.intersection(self.inspections)
-        ):
-            return
-        release, proxy = self.available_release, self.update_proxy()
-        if self.downloaded_update is not None:
-            try:
-                updater.launch_installer(self.downloaded_update, release, resume=self.connected)
-            except ClientError as exc:
-                self.downloaded_update = None
-                self.app_update_install.setText("Загрузить повторно")
-                self.app_update_status.setText(str(exc))
-                return
-            self.app_update_status.setText(
-                "Установщик открыт. Клиент продолжит работу до подтверждения установки. "
-                "После установки нажмите «Открыть Nodera»; подключение будет восстановлено."
-            )
-            return
-        self.app_update_check.setEnabled(False)
-        self.app_update_install.setEnabled(False)
-        self.app_update_status.setText("Загрузка и проверка установщика…")
-        self.app_update_progress.show()
-
-        def downloaded(path):
-            self.app_update_progress.hide()
-            self.downloaded_update = path
-            self.app_update_check.setEnabled(True)
-            self.app_update_install.setEnabled(True)
-            self.app_update_install.setText("Установить обновление")
-            self.app_update_status.setText(
-                f"Версия {release.version} готова. Установка перезапустит клиент."
-            )
-
-        def failed(message):
-            self.app_update_progress.hide()
-            self.app_update_check.setEnabled(True)
-            self.app_update_install.setEnabled(True)
-            self.app_update_status.setText(message)
-
-        self.start_inspection(
-            "app-download",
-            lambda: updater.download_release(
-                release,
-                self.store.root,
-                proxy=proxy,
-                cancelled=self.shutdown_event,
-            ),
-            downloaded,
-            failed,
-            session_bound=False,
         )
 
     def build_servers(self):
@@ -502,21 +304,30 @@ class WorkbenchMixin:
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
         self.address_table.horizontalHeader().setStretchLastSection(False)
-        for index, width in enumerate((210, 125, 140, 120, 170, 60, 100)):
+        for index, width in enumerate((210, 120, 105, 105, 120, 55, 85)):
             self.address_table.setColumnWidth(index, width)
         self.address_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch
         )
         self.address_table.setWordWrap(False)
+        actions = QHBoxLayout()
+        self.geo_determine_button = QPushButton("Проверить выбранный маршрут")
+        self.geo_determine_button.setToolTip("Выберите маршрут на вкладке «Маршруты».")
+        self.geo_determine_button.clicked.connect(self.check_locations)
+        self.geo_cancel_button = QPushButton("Остановить")
+        self.geo_cancel_button.clicked.connect(self.cancel_geo)
+        self.geo_cancel_button.hide()
+        actions.addWidget(self.geo_determine_button)
+        actions.addWidget(self.geo_cancel_button)
+        actions.addStretch()
+        column.addLayout(actions)
         column.addWidget(self.address_table, 1)
         copy_addresses = QPushButton("Копировать выбранные адреса")
         copy_addresses.clicked.connect(self.copy_addresses)
         column.addWidget(copy_addresses, 0, Qt.AlignmentFlag.AlignLeft)
         shortcut = QShortcut(QKeySequence.StandardKey.Copy, self.address_table)
         shortcut.activated.connect(self.copy_addresses)
-        self.address_note = label(
-            "IP проверяются автоматически при подключении и обновлении подписки.", "muted", True
-        )
+        self.address_note = label("", "muted", True)
         column.addWidget(self.address_note)
         self.server_tabs.addTab(addresses, "IP и маршрут")
         layout.addWidget(self.server_tabs, 1)
@@ -533,12 +344,8 @@ class WorkbenchMixin:
         self.refresh_servers_button = QPushButton("Обновить")
         self.refresh_servers_button.clicked.connect(self.reload_servers)
         self.delay_all_button = self.delay_button
-        self.geo_cancel_button = QPushButton("Остановить")
-        self.geo_cancel_button.clicked.connect(self.cancel_geo)
-        self.geo_cancel_button.setVisible(False)
         checks = QHBoxLayout()
-        for button in (self.delay_button, self.geo_cancel_button):
-            checks.addWidget(button)
+        checks.addWidget(self.delay_button)
         self.delay_status = label("Задержка · Фоновая проверка каждые 15 с", "muted", True)
         checks.addWidget(self.delay_status, 1)
         checks.addWidget(self.refresh_servers_button)
@@ -558,6 +365,7 @@ class WorkbenchMixin:
         layout.addWidget(self.route_actions)
         layout.addWidget(checks_panel)
         self.server_tabs.currentChanged.connect(self.refresh_server_controls)
+        self.server_tabs.currentChanged.connect(self.render_addresses)
         self.server_result = label("", "muted", True)
         layout.addWidget(self.server_result)
 
@@ -598,7 +406,7 @@ class WorkbenchMixin:
         return choices
 
     def render_addresses(self):
-        if not hasattr(self, "address_table"):
+        if self.stack.currentIndex() != 4 or self.server_tabs.currentIndex() != 1:
             return
         results = self.geo_for_profile()
         key = (
@@ -611,9 +419,8 @@ class WorkbenchMixin:
         if getattr(self, "_address_key", None) == key:
             return
         self._address_key = key
-        rows = route_inventory(
-            self.display_profile(), results, self.current_choices(), self.geo_client.cache
-        )
+        cache = self.geo_client.cache if self.geo_client is not None else {}
+        rows = route_inventory(self.display_profile(), results, self.current_choices(), cache)
         self.address_table.setRowCount(len(rows))
         roles = {"entry": "Вход", "relay": "Relay", "cdn": "CDN", "server": "Выход"}
         for row, entry in enumerate(rows):
@@ -654,78 +461,29 @@ class WorkbenchMixin:
             "Скрытые адреса сгруппированы по роли; их совпадение не подтверждено."
         )
 
-    def schedule_location_check(self, profile=None):
-        profile = profile or self.display_profile()
-        if self.closing or not profile or not self.settings.geo_auto:
-            return
-        self.pending_geo_profiles[profile.id] = deepcopy(profile)
-        if self.geo_task and self.geo_task.profile.id == profile.id:
-            self.geo_task.cancelled.set()
-        QTimer.singleShot(0, self.run_pending_locations)
-
     def refresh_location_views(self):
         self.geo_render_timer.stop()
         if not self.closing:
             self.render_nodes()
             self.update_route_pill()
 
-    def run_pending_locations(self):
-        if self.closing or self.geo_task:
+    def check_locations(self):
+        profile, name = self.display_profile(), self.current_node()
+        if self.closing or self.task or self.geo_task or not profile or not name:
             return
-        while self.pending_geo_profiles:
-            profile_id = next(iter(self.pending_geo_profiles))
-            profile = self.pending_geo_profiles.pop(profile_id)
-            if not any(item.id == profile_id for item in self.library.profiles):
-                continue
-            self.check_locations(
-                all_nodes=True, automatic=True, profile_override=profile, refresh=True
+        choices = self.current_choices()
+        if not endpoint_rows(profile, name, choices):
+            self.server_result.setText(
+                "Адрес маршрута не передан. Укажите его в редакторе маршрута."
             )
-            if self.geo_task:
-                break
-
-    def check_locations(
-        self, all_nodes=False, automatic=False, profile_override=None, refresh=False
-    ):
-        profile = profile_override or self.display_profile()
-        if self.closing or self.geo_task or not profile:
-            return
-        choices = (
-            self.current_choices()
-            if self.profile and profile.id == self.profile.id
-            else profile.selections
-        )
-        names = (
-            [item["name"] for item in visible_proxies(profile.config)]
-            if all_nodes
-            else [self.current_node()]
-        )
-        if automatic and not all_nodes:
-            names = list(
-                dict.fromkeys(
-                    name for group in self.groups_data for name in group.get("active", [])
-                )
-            )[:4]
-        names = [name for name in names if name and endpoint_rows(profile, name, choices)]
-        if automatic and not refresh:
-            names = [
-                name
-                for name in names
-                if time.time() - self.geo_results.get((profile.id, name), {}).get("timestamp", 0)
-                > 300
-                or self.geo_results.get((profile.id, name), {}).get("endpoints")
-                != endpoint_rows(profile, name, choices)
-            ]
-        if not names:
-            if not automatic:
-                self.server_result.setText(
-                    "Адрес маршрута не передан. Укажите его в редакторе маршрута."
-                )
             return
         proxy = (
             f"http://127.0.0.1:{self.core.mixed_port}"
             if self.connected and self.core.mixed_port
             else getattr(self, "subscription_proxy", None)
         )
+        if self.geo_client is None:
+            self.geo_client = GeoClient(self.store.root)
         self.geo_client.proxy = proxy
         dns = None
         if self.connected:
@@ -740,17 +498,15 @@ class WorkbenchMixin:
         task = GeoTask(
             self.geo_client,
             profile,
-            names,
+            [name],
             choices,
             dns,
             self,
-            force=not automatic,
+            force=True,
             core_pid=self.core.process.pid if self.core.process and self.core.running else None,
         )
         self.geo_task = task
-        if hasattr(self, "geo_determine_button"):
-            self.geo_determine_button.setEnabled(False)
-            self.geo_tool_status.setText("Определение IP и геолокации маршрутов…")
+        self.geo_determine_button.setEnabled(False)
         self.geo_cancel_button.setEnabled(True)
         self.geo_cancel_button.setVisible(True)
         self.server_result.setText("Проверка IP в фоне…")
@@ -787,20 +543,12 @@ class WorkbenchMixin:
             self.refresh_location_views()
             self.geo_cancel_button.setEnabled(False)
             self.geo_cancel_button.setVisible(False)
-            if hasattr(self, "geo_determine_button"):
-                self.geo_determine_button.setEnabled(bool(self.profile and not self.closing))
-                self.geo_tool_status.setText(
-                    "Определение завершено"
-                    if not task.cancelled.is_set()
-                    else "Определение остановлено"
-                )
+            self.refresh_server_controls()
             self.server_result.setText(
                 "Проверка IP завершена" if not task.cancelled.is_set() else "Проверка остановлена"
             )
             if self.closing:
                 QTimer.singleShot(0, self.close)
-            elif self.pending_geo_profiles:
-                QTimer.singleShot(0, self.run_pending_locations)
 
         task.finished.connect(finished)
         task.start()
@@ -882,7 +630,11 @@ class WorkbenchMixin:
     def save_settings(self):
         if self.task or self.closing:
             return
-        from nodera.settings_ui import client_point_value
+        from nodera.settings_ui import (
+            client_point_value,
+            refresh_report_settings,
+            report_preferences,
+        )
 
         settings = replace(
             self.settings,
@@ -894,7 +646,6 @@ class WorkbenchMixin:
             log_level=self.log_level_setting.currentData(),
             log_limit=self.log_limit_setting.value(),
             save_logs=self.log_save_check.isChecked(),
-            geo_auto=self.geo_auto_check.isChecked(),
             tun_stack=self.stack_setting.currentData(),
             tun_mtu=self.mtu_setting.value() if self.mtu_setting.value() >= 1280 else 0,
             ipv6_mode=self.ipv6_setting.currentData(),
@@ -907,6 +658,7 @@ class WorkbenchMixin:
             connection_log_interval=self.connection_log_interval_setting.currentData(),
             map_auto_zoom=self.map_auto_zoom_check.isChecked(),
             client_point=client_point_value(self),
+            client_reports=report_preferences(self),
         )
         try:
             self.store.save_settings(settings)
@@ -914,6 +666,8 @@ class WorkbenchMixin:
             self.error("Не удалось сохранить настройки.")
             return
         self.settings = settings
+        refresh_report_settings(self, force=True)
+        self.report_client_state()
         self.port.setValue(settings.mixed_port)
         self.mtu_setting.setValue(settings.tun_mtu)
         self.timer.setInterval(

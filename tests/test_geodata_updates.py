@@ -163,23 +163,64 @@ def test_database_tool_does_not_start_geolocation(tmp_path, monkeypatch, applica
             QTest.qWait(5)
         assert not window.inspections
 
-    window.check_geodata_updates()
+    window.check_updates()
     wait()
-    assert window.available_geodata_release == release
-    window.install_geodata_update()
+    assert window.available_updates["geodata"] == release
+    window.apply_updates()
     wait()
     assert window.geodata_manager.identity() == release.identity
-    assert "следующем подключении" in window.geodata_status.text()
-    assert window.geolocation_page_index != window.geodata_page_index
+    assert "следующем подключении" in window.update_status.text()
     window.rollback_geodata_update()
+    wait()
     assert window.geodata_manager.selected() is None
 
 
-def test_background_geo_disabled_still_allows_explicit_tool(
+def test_about_does_not_load_databases_or_start_network_checks(tmp_path, monkeypatch):
+    def unexpected(*args, **kwargs):
+        pytest.fail("Geodata verification must wait for an explicit action")
+
+    monkeypatch.setattr(GeodataUpdates, "selected", unexpected)
+    monkeypatch.setattr("nodera.geodata_updates.check_release", unexpected)
+    window = MainWindow(Store(tmp_path), Settings(update_hours=0), None)
+    window.navigate(7)
+    assert not window.inspections
+    assert window.geo_client is None
+
+
+def test_automatic_check_uses_database_selection_metadata_in_test_channel(
     tmp_path, monkeypatch, application_fonts
 ):
+    from nodera.demo import DemoWindow
+
+    window = MainWindow(Store(tmp_path), Settings(update_hours=0), None)
+    window.app_updates_enabled = DemoWindow.app_updates_enabled
+    release, _, _, _ = release_fixture()
+    entry = {"version": release.version, "files": release.files}
+    monkeypatch.setattr(window.geodata_manager, "state", lambda: {"active": entry})
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("Test update check must not read database contents or offer the installer")
+
+    monkeypatch.setattr(window.geodata_manager, "selected", unexpected)
+    monkeypatch.setattr("nodera.updater.check_release", unexpected)
+    checked = []
+    monkeypatch.setattr(
+        "nodera.geodata_updates.check_release", lambda identity, **kw: checked.append(identity)
+    )
+    window.check_updates(automatic=True)
+    from PySide6.QtTest import QTest
+
+    for _ in range(100):
+        application_fonts.processEvents()
+        if not window.inspections:
+            break
+        QTest.qWait(5)
+    assert not window.inspections
+    assert checked == [release.identity]
+
+
+def test_route_details_and_database_controls_fit(tmp_path, application_fonts):
     from nodera.models import Profile
-    from nodera.workbench import WorkbenchMixin
 
     profile = Profile(
         "test",
@@ -190,25 +231,14 @@ def test_background_geo_disabled_still_allows_explicit_tool(
     window = MainWindow(
         Store(tmp_path), Settings(update_hours=0, geo_auto=False, close_to_tray=False), profile
     )
-    calls = []
-    monkeypatch.setattr(window, "check_locations", lambda **kw: calls.append(kw))
-    WorkbenchMixin.schedule_location_check(window)
-    assert not window.pending_geo_profiles and not calls
-    window.auto_client_location()
-    assert "client-location" not in window.inspections
-    window.geo_determine_button.click()
-    assert calls == [{"all_nodes": True, "refresh": True}]
-
-
-def test_geolocation_table_and_long_tool_navigation_fit(tmp_path, application_fonts):
-    window = MainWindow(
-        Store(tmp_path), Settings(update_hours=0, geo_auto=False, close_to_tray=False), None
-    )
     window.show()
-    window.navigate(window.geolocation_page_index)
+    window.navigate(4)
+    window.server_tabs.setCurrentIndex(1)
     application_fonts.processEvents()
     assert window.address_table.isVisible()
     assert window.address_table.columnWidth(0) >= 150
-    window.navigate(window.geodata_page_index)
+    assert window.geo_determine_button.isVisible()
+    window.navigate(7)
     application_fonts.processEvents()
+    assert window.update_check.isVisible()
     assert window.navigation.rect().contains(window.navigation.tools.geometry())

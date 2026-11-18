@@ -249,8 +249,8 @@ def ui_window(tmp_path):
     )
     for timer in window.findChildren(QTimer):
         timer.stop()
-    window.core_update_timer = QTimer(window)
-    window.core_update_timer.setSingleShot(True)
+    window.update_timer = QTimer(window)
+    window.update_timer.setSingleShot(True)
     return app, window
 
 
@@ -276,22 +276,22 @@ def test_update_notification_once_and_click_routes_to_core(tmp_path, monkeypatch
     monkeypatch.setattr(window.tray, "isVisible", lambda: True)
     monkeypatch.setattr(QSystemTrayIcon, "supportsMessages", lambda: True)
     monkeypatch.setattr(window.tray, "showMessage", lambda *a: notices.append(a))
-    monkeypatch.setattr(window, "install_core_update", lambda: downloads.append(True))
-    window.check_core_updates()
+    monkeypatch.setattr(window, "apply_updates", lambda: downloads.append(True))
+    window.check_updates(automatic=True)
     wait_ui(app, window)
     assert len(notices) == 1 and not downloads
-    assert window.core_update_timer.interval() == 6 * 60 * 60 * 1000
-    window.check_core_updates()
+    assert window.update_timer.interval() == 6 * 60 * 60 * 1000
+    window.check_updates(automatic=True)
     wait_ui(app, window)
     assert len(notices) == 1
-    window.show_update_notification()
+    window.show_update_offer()
     app.processEvents()
-    assert "1.19.34" in window.core_update_offer.message.text()
-    window.core_update_offer.reject()
+    assert "1.19.34" in window.update_offer.message.text()
+    window.update_offer.reject()
     assert not downloads
-    window.show_core_update_offer()
+    window.show_update_offer()
     app.processEvents()
-    window.core_update_offer.action.click()
+    window.update_offer.action.click()
     assert downloads == [True]
     assert window.stack.currentWidget() == window.application_page
 
@@ -300,7 +300,7 @@ def test_update_notification_once_and_click_routes_to_core(tmp_path, monkeypatch
 def test_install_and_rollback_do_not_interrupt_current_connection(tmp_path, monkeypatch, connected):
     app, window = ui_window(tmp_path)
     release, _, _ = release_fixture()
-    window.available_core_release = release
+    window.available_updates["core"] = release
     window.connected = connected
     window.running_core_version = "1.19.33"
     entry, binary = stage(window.core_manager, "1.19.34", b"new")
@@ -308,16 +308,17 @@ def test_install_and_rollback_do_not_interrupt_current_connection(tmp_path, monk
     monkeypatch.setattr(
         window.core, "stop", lambda *a: pytest.fail("Interrupted current connection")
     )
-    window.install_core_update()
+    window.apply_updates()
     wait_ui(app, window)
     assert window.core_manager.resolve() == binary
     assert window.connected == connected
-    assert "следующем подключении" in window.core_update_status.text()
-    assert window.available_core_release is None
+    assert "следующем подключении" in window.update_status.text()
+    assert "core" not in window.available_updates
     assert window.application_values["Ядро"] == (
         "Mihomo 1.19.34 · работает 1.19.33" if connected else "Mihomo 1.19.34"
     )
     window.rollback_core_update()
+    wait_ui(app, window)
     assert window.core_manager.selected() is None
     assert window.connected == connected
     monkeypatch.undo()
@@ -331,16 +332,16 @@ def test_core_check_retry_and_failed_download_keep_available_update(tmp_path, mo
         raise ClientError("Offline")
 
     monkeypatch.setattr(core_updates, "check_release", fail)
-    window.check_core_updates()
+    window.check_updates(automatic=True)
     wait_ui(app, window)
-    assert window.core_update_status.text() == "Offline"
-    assert window.core_update_check.isEnabled()
-    assert window.core_update_timer.interval() == 30 * 60 * 1000
+    assert window.update_status.text() == "Ядро Mihomo · Offline"
+    assert window.update_check.isEnabled()
+    assert window.update_timer.interval() == 30 * 60 * 1000
     release, _, _ = release_fixture()
-    window.available_core_release = release
+    window.available_updates["core"] = release
     monkeypatch.setattr(window.core_manager, "download", fail)
-    window.install_core_update()
+    window.apply_updates()
     wait_ui(app, window)
-    assert window.available_core_release == release
-    assert window.core_update_install.isEnabled()
+    assert window.available_updates["core"] == release
+    assert window.update_apply.isEnabled()
     assert window.core_manager.selected() is None

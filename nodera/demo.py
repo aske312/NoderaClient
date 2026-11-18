@@ -136,10 +136,8 @@ def prepare_demo(store):
             Settings(
                 tun=False,
                 system_proxy=False,
-                geo_auto=False,
                 update_hours=0,
                 close_to_tray=False,
-                client_location_attempted=True,
             )
         )
 
@@ -149,6 +147,8 @@ def is_demo_profile(profile):
 
 
 class DemoWindow(MainWindow):
+    app_updates_enabled = False
+
     def is_pro_profile(self, profile):
         if is_demo_profile(profile):
             return DEMO_PROFILES[profile.id]["pro"]
@@ -255,17 +255,9 @@ class DemoWindow(MainWindow):
         self.scenarios.check_subscription(profile.id, updating=True)
         return self.scenarios.apply_profile(replace(profile, name=name))
 
-    def auto_client_location(self):
-        if not self.demo_mode:
-            return super().auto_client_location()
-
-    def schedule_location_check(self, profile=None):
-        if not self.demo_mode and not is_demo_profile(profile or self.profile):
-            return super().schedule_location_check(profile)
-
-    def check_locations(self, *args, **kwargs):
-        if not self.demo_mode and not is_demo_profile(kwargs.get("profile_override")):
-            return super().check_locations(*args, **kwargs)
+    def check_locations(self):
+        if not self.demo_mode and not is_demo_profile(self.profile):
+            return super().check_locations()
         self.server_result.setText("Демо · адреса маршрутов фиктивные.")
 
     def test_group(self):
@@ -332,9 +324,3 @@ class DemoWindow(MainWindow):
 
     def diagnose_network(self):
         return self.diagnose() if self.demo_mode else super().diagnose_network()
-
-    def check_app_updates(self):
-        return None
-
-    def install_app_update(self):
-        return None

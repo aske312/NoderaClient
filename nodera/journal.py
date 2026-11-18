@@ -162,6 +162,10 @@ class Journal:
         for name in (self.path.name, *(f"{self.path.stem}.{i}.jsonl" for i in (1, 2, 3))):
             (self.root / name).unlink(missing_ok=True)
 
+    @locked
+    def snapshot(self):
+        return [dict(entry) for entry in self.entries]
+
 
 def format_entry(entry):
     return (

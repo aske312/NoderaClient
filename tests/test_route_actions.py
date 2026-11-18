@@ -17,24 +17,24 @@ from nodera.ui import MainWindow
 from tests.loopback import ThreadingHTTPServer
 
 
-def test_automatic_client_point_saved_once_and_network_rows_follow_mode(tmp_path, monkeypatch):
+def test_manual_client_point_and_network_rows_follow_mode(tmp_path, monkeypatch):
     app = QApplication.instance() or QApplication([])
     window = MainWindow(Store(tmp_path), Settings(update_hours=0), None)
-    window.client_location_timer.stop()
     window.timer.stop()
     calls = []
     point = dict(code="DE", lat=50.1, lon=8.6, name="Frankfurt", source="ip-physical")
     monkeypatch.setattr(
         "nodera.settings_ui.detect_client_location", lambda: calls.append(1) or point
     )
-    detect_point(window, automatic=True)
+    detect_point(window)
     while window.inspections:
         app.processEvents()
         time.sleep(0.01)
-    window.auto_client_location()
+    assert not Store(tmp_path).load_settings().client_point
+    window.save_settings()
     saved = Store(tmp_path).load_settings()
     assert calls == [1] and saved.client_point["code"] == "DE"
-    assert saved.client_location_attempted and window.world_map.client_point["code"] == "DE"
+    assert window.world_map.client_point["code"] == "DE"
     window.connection_mode.setCurrentIndex(window.connection_mode.findData("proxy"))
     assert not window.stack_setting.setting_row.isEnabled()
     assert not window.mtu_setting.isEnabled()
@@ -101,7 +101,6 @@ def test_selected_connection_can_be_closed_in_automatic_strategy(tmp_path, monke
         "",
     )
     window = MainWindow(Store(tmp_path), Settings(update_hours=0), profile)
-    window.client_location_timer.stop()
     window.timer.stop()
     window.connected = True
     window.navigate(8)

@@ -1,8 +1,44 @@
-param([switch]$Clean, [switch]$Installer, [switch]$TestBuild, [string]$PythonExecutable)
+param(
+    [switch]$Clean,
+    [switch]$Installer,
+    [switch]$TestBuild,
+    [string]$PythonExecutable,
+    [ValidatePattern('^[0-9a-fA-F]{40}$')][string]$SigningCertificateThumbprint,
+    [uri]$SigningTimestampUrl,
+    [string]$SignToolPath
+)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
+
+function Sign-BuildArtifact([string]$Path) {
+    if (-not $SigningCertificateThumbprint) { return }
+    & $SignToolPath sign /sha1 $SigningCertificateThumbprint /fd SHA256 /tr $SigningTimestampUrl.AbsoluteUri /td SHA256 $Path
+    if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed: $Path" }
+    & $SignToolPath verify /pa /tw $Path
+    if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed: $Path" }
+}
+
 Push-Location -LiteralPath $projectRoot
 try {
+    if ($SigningCertificateThumbprint) {
+        if (-not $SigningTimestampUrl -or -not $SigningTimestampUrl.IsAbsoluteUri -or $SigningTimestampUrl.Scheme -ne 'https') {
+            throw 'Signing requires an HTTPS RFC 3161 timestamp URL.'
+        }
+        $certificate = Get-Item -LiteralPath "Cert:\CurrentUser\My\$SigningCertificateThumbprint" -ErrorAction SilentlyContinue
+        if (-not $certificate -or -not $certificate.HasPrivateKey) {
+            throw 'The signing certificate and its private key must be available in CurrentUser\My.'
+        }
+        if ($SignToolPath) {
+            $SignToolPath = (Resolve-Path -LiteralPath $SignToolPath).Path
+        } else {
+            $SignToolPath = (Get-Command signtool.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+            if (-not $SignToolPath) {
+                throw 'Use -SignToolPath to point to signtool.exe from the Windows SDK.'
+            }
+        }
+    } elseif ($SigningTimestampUrl -or $SignToolPath) {
+        throw 'Use -SigningCertificateThumbprint to enable Authenticode signing.'
+    }
     $pythonPath = if ($PythonExecutable) { (Resolve-Path -LiteralPath $PythonExecutable).Path } else { Join-Path $projectRoot '.venv\Scripts\python.exe' }
     & $pythonPath scripts/prepare_core.py
     if ($LASTEXITCODE -ne 0) { throw 'Embedded Mihomo preparation failed' }
@@ -21,6 +57,7 @@ try {
     & $pythonPath -m PyInstaller --noconfirm @cleanArguments --distpath $buildOutput packaging/Nodera.spec
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed' }
     $appPath = Join-Path $buildOutput 'Nodera\Nodera.exe'
+    Sign-BuildArtifact $appPath
     $iconPath = Join-Path $buildOutput 'Nodera\_internal\nodera\resources\nodera.ico'
     if (-not (Test-Path -LiteralPath $iconPath)) { throw 'Application icon missing' }
     $shell = New-Object -ComObject WScript.Shell
@@ -46,12 +83,15 @@ try {
         $engineOutput = Join-Path $projectRoot 'build\installer-engine'
         & $compilerPath ('/DAppVersion=' + $metadata.version) ('/DAppSource=' + (Split-Path -Parent $appPath)) ('/DInstallerOutput=' + $engineOutput) packaging/Nodera.iss
         if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }
-        & $pythonPath scripts/prepare_installer_bundle.py --source (Split-Path -Parent $appPath) --engine (Join-Path $engineOutput 'Nodera-Engine.exe')
+        $enginePath = Join-Path $engineOutput 'Nodera-Engine.exe'
+        Sign-BuildArtifact $enginePath
+        & $pythonPath scripts/prepare_installer_bundle.py --source (Split-Path -Parent $appPath) --engine $enginePath
         if ($LASTEXITCODE -ne 0) { throw 'Installer engine verification failed' }
         $installerOutput = Join-Path $projectRoot 'dist\installers'
         & $pythonPath -m PyInstaller --noconfirm @cleanArguments --distpath $installerOutput --workpath build/installer-bootstrap packaging/Installer.spec
         if ($LASTEXITCODE -ne 0) { throw 'Installer bootstrap build failed' }
         $installerPath = Join-Path $installerOutput 'Nodera-Setup.exe'
+        Sign-BuildArtifact $installerPath
         $installerHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
         [IO.File]::WriteAllText($installerPath + '.sha256', $installerHash + '  ' + (Split-Path -Leaf $installerPath) + [Environment]::NewLine)
         Write-Output ('Installer: ' + $installerPath)

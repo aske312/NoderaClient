@@ -114,8 +114,6 @@ def main() -> int:
                     tun=False,
                     system_proxy=False,
                     update_hours=0,
-                    geo_auto=False,
-                    client_location_attempted=True,
                     close_to_tray=False,
                 )
             )
@@ -136,14 +134,8 @@ def main() -> int:
             window.subscription_proxy = subscription_proxy
             window.setWindowTitle("Nodera Test · Демо" if window.demo_mode else "Nodera Test")
             window.tray.setToolTip("Nodera Test")
-            window.app_update_timer.stop()
-            window.app_update_check.setEnabled(False)
-            window.app_update_status.setText(
-                "Тестовая сборка · обновляется через локальную сборку приложения"
-            )
         if development:
             window.subscription_proxy = subscription_proxy
-            window.client_location_timer.stop()
             window.setWindowTitle("Nodera · тестовый стенд")
             window.tray.setToolTip("Nodera · тестовый стенд")
         # Closing a hidden tray window does not emit lastWindowClosed.

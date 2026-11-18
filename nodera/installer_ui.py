@@ -9,8 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from nodera.chrome import FramelessWindowMixin
-from nodera.install_service import InstallService
+from nodera.install_service import ANTIVIRUS_ERROR_CODES, AntivirusProtectionError, InstallService
 from nodera.modals import AppDialog, QMessageBox
 from nodera.models import ClientError
 from nodera.theme import STYLE
@@ -63,7 +63,7 @@ def configure_style(app):
 
 class Worker(QThread):
     result = Signal(object)
-    failed = Signal(str)
+    failed = Signal(str, bool)
     progress = Signal(str)
 
     def __init__(self, callback, parent):
@@ -74,10 +74,11 @@ class Worker(QThread):
         try:
             self.result.emit(self.callback(self.progress.emit))
         except ClientError as exc:
-            self.failed.emit(str(exc))
+            self.failed.emit(str(exc), isinstance(exc, AntivirusProtectionError))
         except Exception as exc:
             self.failed.emit(
-                f"Не удалось продолжить: {exc}. Повторите запуск установщика от имени администратора."
+                f"Не удалось продолжить: {exc}. Повторите запуск установщика от имени администратора.",
+                False,
             )
 
 
@@ -207,8 +208,10 @@ class InstallerWindow(FramelessWindowMixin, QMainWindow):
         self.terms = self.link("Условия", self.show_terms)
         self.options = self.link("Настроить", self.show_options)
         self.repair = self.link("Восстановить", self.force_repair)
+        self.security = self.link("Безопасность Windows", self.show_windows_security)
         self.repair.hide()
-        for button in (self.terms, self.options, self.repair):
+        self.security.hide()
+        for button in (self.terms, self.options, self.repair, self.security):
             links.addWidget(button)
         links.addStretch()
         layout.addLayout(links)
@@ -265,13 +268,53 @@ class InstallerWindow(FramelessWindowMixin, QMainWindow):
     def inspected(self, result):
         self.plan, self.startup, self.desktop = result
         self.folder = self.plan.folder
+        missing = self.plan.installed is not None and not (self.folder / "Nodera.exe").is_file()
+        self.security.setVisible(missing and not self.preview)
         if self.plan.action == "current":
             self.status.setText("Актуальная версия уже установлена")
             self.primary.setText("Открыть Nodera")
             self.repair.show()
         else:
-            self.status.setText("Всё готово")
+            self.status.setText(
+                "Не найден Nodera.exe. Если его удалил Defender, проверьте журнал защиты."
+                if missing
+                else "Всё готово"
+            )
             self.primary.setText("Принять и установить")
+
+    def show_windows_security(self):
+        dialog = AppDialog(self, "Безопасность Windows")
+        dialog.setFixedWidth(470)
+        layout = dialog.content_layout()
+        layout.addWidget(
+            label(
+                "Проверьте запись о Nodera в «Журнале защиты» и обновите базы Defender. "
+                "Скачайте установщик из официального релиза и сверьте SHA-256.\n\n"
+                "Если блокировка повторяется и вы уверены в файле, откройте «Защита от вирусов "
+                "и угроз» → «Управление настройками» → «Добавление или удаление исключений» "
+                "→ «Добавить исключение» → «Файл». Выберите только проверенный EXE, указанный "
+                "в журнале. Исключение отключает его проверку в реальном времени. "
+                "Удалите исключение, когда файл снова проходит проверку.",
+                "modalDescription",
+                wrap=True,
+            )
+        )
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.button(QDialogButtonBox.StandardButton.Close).setText("Закрыть")
+        buttons.rejected.connect(dialog.reject)
+        open_settings = buttons.addButton(
+            "Открыть настройки Windows", QDialogButtonBox.ButtonRole.ActionRole
+        )
+
+        def launch_settings():
+            if not QDesktopServices.openUrl(QUrl("ms-settings:windowsdefender")):
+                QMessageBox.warning(
+                    dialog, "Nodera", "Откройте «Безопасность Windows» через «Пуск»."
+                )
+
+        open_settings.clicked.connect(launch_settings)
+        layout.addWidget(buttons)
+        dialog.exec()
 
     def show_terms(self):
         dialog = AppDialog(self)
@@ -334,6 +377,7 @@ class InstallerWindow(FramelessWindowMixin, QMainWindow):
         self.progress.show()
         self.primary.setText("Подготавливаем…")
         self.repair.hide()
+        self.security.hide()
         self.run_task(
             lambda progress: self.service.run(
                 plan, self.startup, self.desktop, progress, force_repair=force_repair
@@ -349,10 +393,14 @@ class InstallerWindow(FramelessWindowMixin, QMainWindow):
         self.primary.setText("Открыть Nodera")
         self.status.setText(result["warning"] or "Всё готово. Можно начинать.")
 
-    def failed(self, message):
+    def failed(self, message, protection_help):
         self.progress.hide()
         self.primary.setText("Повторить")
         self.status.setText("Не удалось завершить подготовку")
+        self.security.setVisible(protection_help and not self.preview)
+        if self.plan and self.plan.action == "current":
+            self.repair.show()
+            self.primary.setText("Открыть Nodera")
         if not self.exit_when_done:
             QMessageBox.warning(self, "Nodera", message)
 
@@ -366,6 +414,14 @@ class InstallerWindow(FramelessWindowMixin, QMainWindow):
                 arguments.append("--connect")
             subprocess.Popen(arguments, cwd=self.folder)
         except OSError as exc:
+            if (
+                isinstance(exc, FileNotFoundError)
+                or getattr(exc, "winerror", None) in ANTIVIRUS_ERROR_CODES
+            ):
+                self.security.show()
+                self.repair.show()
+                self.status.setText("Nodera не открылась. Проверьте журнал защиты Windows.")
+                return
             QMessageBox.warning(
                 self,
                 "Nodera",

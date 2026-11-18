@@ -40,7 +40,6 @@ def make_window(tmp_path):
     )
     window = MainWindow(Store(tmp_path), Settings(update_hours=0, geo_auto=False), profile)
     window.timer.stop()
-    window.client_location_timer.stop()
     window.show()
     window.navigate(4)
     return app, window

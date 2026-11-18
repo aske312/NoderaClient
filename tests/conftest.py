@@ -86,6 +86,7 @@ def stable_test_network(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def offline_automatic_core_updates(monkeypatch):
+    monkeypatch.setattr("nodera.updater.check_release", lambda *a, **kw: None)
     monkeypatch.setattr("nodera.core_updates.check_release", lambda *a, **kw: None)
     monkeypatch.setattr("nodera.geodata_updates.check_release", lambda *a, **kw: None)
 
@@ -106,9 +107,3 @@ def isolate_system_startup(monkeypatch):
         "nodera.autostart.set_enabled",
         lambda _: pytest.fail("Unit test attempted to change Windows startup"),
     )
-
-
-@pytest.fixture(autouse=True)
-def offline_automatic_route_locations(monkeypatch):
-    # Lifecycle checks are verified separately without contacting public GeoIP services.
-    monkeypatch.setattr("nodera.workbench.WorkbenchMixin.schedule_location_check", lambda *a: None)

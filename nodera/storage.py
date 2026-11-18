@@ -153,6 +153,11 @@ class Store:
                 or not valid_client_point(settings.client_point)
                 or type(settings.client_location_attempted) is not bool
                 or not valid_preferences(settings.channel_preferences)
+                or not isinstance(settings.client_reports, dict)
+                or any(
+                    not isinstance(key, str) or type(value) is not bool
+                    for key, value in settings.client_reports.items()
+                )
                 or settings.tun_stack not in ("profile", "mixed", "system", "gvisor")
                 or type(settings.tun_mtu) is not int
                 or not (settings.tun_mtu == 0 or 1280 <= settings.tun_mtu <= 9000)

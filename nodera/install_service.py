@@ -16,6 +16,11 @@ from nodera.models import ClientError
 
 APP_ID = "{6201CE8F-E587-47BC-BE30-024E3E63C508}_is1"
 TRANSIENT = {"runtime", "updates", "logs", "nodera.lock", "maintenance.lock"}
+ANTIVIRUS_ERROR_CODES = {225, 226}
+
+
+class AntivirusProtectionError(ClientError):
+    """Windows blocked a file or the installed executable is missing."""
 
 
 @dataclass(frozen=True)
@@ -187,6 +192,15 @@ def explain_failure(code, log, *, windows=False):
     return f"{action}\nКод: {code}. Журнал: {log}"
 
 
+def windows_install_error(code, log, detail=""):
+    if code in ANTIVIRUS_ERROR_CODES:
+        return AntivirusProtectionError(
+            f"Windows заблокировала или удалила файл при установке. Проверьте журнал защиты.\n"
+            f"Код: {code}. Журнал: {log}{detail}"
+        )
+    return ClientError(explain_failure(code, log, windows=True) + detail)
+
+
 class InstallService:
     def __init__(self, identity, manifest, engine, root, *, preview=False):
         self.identity, self.manifest = identity, manifest
@@ -221,9 +235,7 @@ class InstallService:
                 f"Операция не завершилась вовремя. Не удаляйте резервную копию; повторите запуск установщика.\nЖурнал: {log}"
             ) from exc
         except OSError as exc:
-            raise ClientError(
-                explain_failure(getattr(exc, "winerror", None) or exc.errno, log, windows=True)
-            ) from exc
+            raise windows_install_error(getattr(exc, "winerror", None) or exc.errno, log) from exc
         if result.returncode not in (0, 3010):
             detail = ""
             try:
@@ -233,9 +245,7 @@ class InstallService:
                 pass
             windows_error = re.search(r"(?:Ошибка|Error)\s+(\d+)\s*:", detail, re.IGNORECASE)
             if windows_error:
-                raise ClientError(
-                    explain_failure(int(windows_error.group(1)), log, windows=True) + detail
-                )
+                raise windows_install_error(int(windows_error.group(1)), log, detail)
             raise ClientError(explain_failure(result.returncode, log) + detail)
 
     def _engine(self, folder, desktop, log):
@@ -322,17 +332,27 @@ class InstallService:
             restore_data(backup, self.root)
             warning = ""
             progress("Завершаем подготовку…")
+            exe = folder / "Nodera.exe"
             try:
-                exe = folder / "Nodera.exe"
                 self._execute(
                     [str(exe), "--configure-autostart", "enable" if startup else "disable"],
                     logs / f"{stamp}-startup.log",
                 )
+            except AntivirusProtectionError:
+                raise
             except ClientError:
                 warning = "Приложение готово, но автозапуск не настроен. Откройте «Настройки → Основное → Запускать с Windows»."
+            if not exe.is_file():
+                raise AntivirusProtectionError(
+                    "После установки не найден Nodera.exe. Проверьте, есть ли запись о нём в журнале защиты Windows."
+                )
             return {"folder": folder, "reconnect": reconnect, "warning": warning}
         except Exception as exc:
             restore_data(backup, self.root)
+            if isinstance(exc, AntivirusProtectionError):
+                raise AntivirusProtectionError(
+                    f"{exc}\nВаши данные сохранены: {backup or self.root}"
+                ) from exc
             if isinstance(exc, ClientError):
                 raise ClientError(f"{exc}\nВаши данные сохранены: {backup or self.root}") from exc
             raise ClientError(

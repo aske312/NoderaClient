@@ -34,14 +34,12 @@ from PySide6.QtWidgets import (
 )
 
 from nodera.chrome import FramelessWindowMixin
-from nodera.component_tools import ComponentToolsMixin
+from nodera.client_reports import ConnectionReporter
 from nodera.core import Core, is_admin
-from nodera.core_updates_ui import CoreUpdatesMixin
 from nodera.dialogs import RouteDialog
 from nodera.elevation import launch_admin
 from nodera.flow_monitor import FlowMonitor
 from nodera.flows_ui import FlowsMixin
-from nodera.geolocation import GeoClient
 from nodera.journal import Journal
 from nodera.locations import country
 from nodera.modals import QMessageBox
@@ -55,6 +53,7 @@ from nodera.profiles_ui import ProfilesMixin
 from nodera.routes import route_for_node
 from nodera.server_assets import node_countries
 from nodera.theme import STYLE as STYLE
+from nodera.update_center import UpdateCenterMixin
 from nodera.widgets import app_icon, label
 from nodera.workbench import WorkbenchMixin
 from nodera.world_map import WorldCanvas
@@ -83,8 +82,7 @@ class MainWindow(
     FramelessWindowMixin,
     ProfilesMixin,
     WorkbenchMixin,
-    CoreUpdatesMixin,
-    ComponentToolsMixin,
+    UpdateCenterMixin,
     NetworkRecoveryMixin,
     PresentationMixin,
     FlowsMixin,
@@ -102,6 +100,9 @@ class MainWindow(
         self.profile_retry_at = {}
         self.pending_connect = False
         self.core = core if core is not None else Core(store.root / "runtime")
+        self.client_reporter = ConnectionReporter()
+        self._report_stats = None
+        self.running_core_version = ""
         self.core.trace.configure(settings.log_limit, settings.save_logs)
         self.core.connection_log.configure(
             settings.save_connection_logs,
@@ -112,13 +113,12 @@ class MainWindow(
         self.poll_task = None
         self.inspections = {}
         self.geo_task = None
-        self.pending_geo_profiles = {}
         self.geo_render_timer = QTimer(self)
         self.geo_render_timer.setSingleShot(True)
         self.geo_render_timer.timeout.connect(self.refresh_location_views)
         self.geo_results = {}
         self.delay_results = {}
-        self.geo_client = GeoClient(store.root)
+        self.geo_client = None
         self.journal = Journal(store.root, settings.log_limit, settings.save_logs)
         self.session_generation = 0
         self.quit_requested = False
@@ -167,7 +167,6 @@ class MainWindow(
         self.embed_settings_tools()
         self.build_application()
         self.build_flows()
-        self.build_component_tools()
         self.navigate(0)
         self.refresh_profile()
         self.log(
@@ -195,25 +194,13 @@ class MainWindow(
         self.subscription_timer.timeout.connect(self.auto_update_profile)
         self.subscription_timer.start()
         if getattr(sys, "frozen", False):
-            self.app_update_timer = QTimer(self)
-            self.app_update_timer.setSingleShot(True)
-            self.app_update_timer.timeout.connect(self.check_app_updates)
-            self.app_update_timer.start(5000)
-            self.core_update_timer = QTimer(self)
-            self.core_update_timer.setSingleShot(True)
-            self.core_update_timer.timeout.connect(self.check_core_updates)
-            self.core_update_timer.start(12000)
-            self.geodata_update_timer = QTimer(self)
-            self.geodata_update_timer.setSingleShot(True)
-            self.geodata_update_timer.timeout.connect(self.check_geodata_updates)
-            self.geodata_update_timer.start(18000)
+            self.update_timer = QTimer(self)
+            self.update_timer.setSingleShot(True)
+            self.update_timer.timeout.connect(lambda: self.check_updates(automatic=True))
+            self.update_timer.start(12000)
         QTimer.singleShot(1000, self.auto_update_profile)
-        self.client_location_timer = QTimer(self)
-        self.client_location_timer.setSingleShot(True)
-        self.client_location_timer.timeout.connect(self.auto_client_location)
-        self.client_location_timer.start(1500)
         self.tray = QSystemTrayIcon(self.windowIcon(), self)
-        self.tray.messageClicked.connect(self.show_update_notification)
+        self.tray.messageClicked.connect(self.show_update_offer)
         self.tray.setToolTip("Nodera · отключено")
         menu = QMenu(self)
         show = QAction("Открыть Nodera", self)
@@ -236,13 +223,6 @@ class MainWindow(
         self.setup_network_recovery()
         self.refresh_controls()
         QApplication.instance().installEventFilter(self)
-
-        QTimer.singleShot(0, self.check_saved_profile_locations)
-
-    def check_saved_profile_locations(self):
-        if not self.closing:
-            for profile in self.library.profiles:
-                self.schedule_location_check(profile)
 
     def eventFilter(self, watched, event):
         if (
@@ -288,6 +268,8 @@ class MainWindow(
             QToolTip.hideText()
         if index == 2:
             self.refresh_autostart()
+        if index == 4:
+            self.render_addresses()
         self.navigation.set_current(index)
         if hasattr(self, "timer"):
             self.timer.setInterval(
@@ -346,15 +328,6 @@ class MainWindow(
             self.toggle()
 
     def refresh_controls(self):
-        if hasattr(self, "geo_determine_button"):
-            self.geo_determine_button.setEnabled(
-                bool(self.profile and not self.closing and not self.geo_task)
-            )
-            self.geolocation_profile.setText(
-                "Подписка: " + self.profile.name
-                if self.profile
-                else "Добавьте подписку для определения маршрутов."
-            )
         if self.profile:
             self.library = self.library.upsert(self.profile)
         has_subscription = bool(self.library.profiles)
@@ -410,12 +383,6 @@ class MainWindow(
         self.refresh_server_controls()
         self.refresh_flow_controls()
 
-    def auto_client_location(self):
-        from nodera.settings_ui import detect_point
-
-        if not self.closing and self.settings.geo_auto and not self.settings.client_point:
-            detect_point(self, automatic=True)
-
     def refresh_profile(self):
         self.refresh_library()
         if self.profile:
@@ -437,7 +404,9 @@ class MainWindow(
         self.refresh_controls()
         self.refresh_policy()
         self.refresh_dashboard()
-        if not self.connected:
+        if self.connected:
+            self.report_client_state()
+        else:
             self.offline_groups()
 
     def offline_groups(self):
@@ -689,6 +658,9 @@ class MainWindow(
             bool(idle and self.connected and self.profile and "delays" not in self.inspections)
         )
         self.refresh_servers_button.setEnabled(idle and self.connected)
+        self.geo_determine_button.setEnabled(
+            bool(idle and self.profile and self.current_node() and not self.geo_task)
+        )
         self.location_button.setEnabled(
             bool(
                 idle
@@ -1091,6 +1063,7 @@ class MainWindow(
         )
 
     def set_connected(self, version, verify=False):
+        self._report_stats = None
         self.flow_monitor.clear()
         self.connected = True
         self.running_core_version = str(version)
@@ -1129,11 +1102,12 @@ class MainWindow(
         if verify:
             self.flow_timer.start(self.settings.flow_poll_seconds * 1000)
             QTimer.singleShot(0, self.capture_flows)
-            self.schedule_location_check()
             self.check_connection()
             QTimer.singleShot(0, self.periodic_delays)
+        self.report_client_state("connected")
 
     def set_disconnected(self):
+        self.report_client_state("disconnected")
         self.cancel_network_recovery()
         self.flow_timer.stop()
         self.delay_results.clear()
@@ -1166,6 +1140,7 @@ class MainWindow(
 
     def connection_failed(self, message):
         self.set_disconnected()
+        self.report_client_state("failed", issues=("core_start_failed",))
         self.hint.setText("Нет подключения. Обновите подписку или проверьте сеть.")
         self.hint.setToolTip(message)
         self.error(message)
@@ -1175,6 +1150,8 @@ class MainWindow(
             return
 
         def updated(data):
+            self._report_stats = data
+            self.report_client_state("connected", data)
             if self.api_failures:
                 self.hint.setText(self.network_error or self.connection_hint)
             self.api_failures = 0
@@ -1204,6 +1181,8 @@ class MainWindow(
             self.set_groups(data["groups"])
 
         def failed(message):
+            self._report_stats = None
+            self.report_client_state("failed", issues=("core_api_unavailable",))
             self.api_failures += 1
             if self.stack.currentIndex() == 8:
                 self.flow_summary.setText(
@@ -1239,8 +1218,6 @@ class MainWindow(
         def success(data):
             if not self.closing and generation == self.session_generation:
                 updated(data)
-                if self.settings.geo_auto:
-                    self.check_locations(automatic=True)
                 import time
 
                 if (
@@ -1306,6 +1283,61 @@ class MainWindow(
         self.quit_requested = True
         self.close()
 
+    def report_client_state(self, state=None, data=None, issues=()):
+        profile = self.profile
+        if self.session_profile and (
+            profile is None
+            or profile.id != self.session_profile.id
+            or profile.url != self.session_profile.url
+        ):
+            profile = None
+        state = state or ("connected" if self.connected else "disconnected")
+        if profile is None or self.settings.client_reports.get(profile.id) is not True:
+            self.client_reporter.observe(
+                profile, self.settings, None, {}, {"state": state, "mode": "proxy"}
+            )
+            return
+        data = (data or self._report_stats) if state == "connected" else {}
+        counters = (
+            {**data.get("report_counters", data), "uptime": data.get("uptime")}
+            if data is not None
+            else None
+        )
+        started = getattr(self.core, "started_at", 0)
+        epoch = (started, str(getattr(self.core, "runtime", "")))
+        journal = getattr(getattr(self.core, "connection_log", None), "journal", None)
+        events = journal.snapshot() if journal is not None and hasattr(journal, "snapshot") else []
+        if state == "failed":
+            events = []
+        diagnostics = {
+            "state": state,
+            "mode": "tun"
+            if (self.session_tun if self.connected else self.settings.tun)
+            else "proxy",
+            "network_check": self.network_state if state == "connected" else "unverified",
+            "network_check_age_seconds": max(0, int(time.time() - self.network_checked_wall))
+            if state == "connected" and self.network_checked_wall
+            else None,
+            "core_version": getattr(self, "running_core_version", ""),
+            "since": time.time() - (time.monotonic() - started) if started else time.time(),
+            "issues": [
+                *issues,
+                *(
+                    ("https_probe_failed",)
+                    if state == "connected" and self.network_state == "error"
+                    else ()
+                ),
+            ],
+        }
+        proxy = (
+            self.channel_request_proxy()
+            if state == "connected"
+            else getattr(self, "subscription_proxy", None)
+        )
+        self.client_reporter.observe(
+            profile, self.settings, epoch, counters, diagnostics, events, proxy=proxy
+        )
+
     def closeEvent(self, event):
         self.navigation.palette.hide()
         if (
@@ -1318,6 +1350,7 @@ class MainWindow(
             self.hide()
             return
         self.closing = True
+        self.client_reporter.close()
         if self.channel_cancel:
             self.channel_cancel.set()
         self.shutdown_event.set()

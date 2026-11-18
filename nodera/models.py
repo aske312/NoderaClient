@@ -41,6 +41,8 @@ class Profile:
     pro_verification: dict[str, Any] = field(default_factory=dict)
     access_state: str = ""
     auto_update_paused: bool = False
+    reports_version: int = 0
+    reports_diagnostics: bool = False
 
 
 @dataclass
@@ -81,7 +83,7 @@ class Settings:
     log_level: str = "info"
     log_limit: int = 2000
     save_logs: bool = True
-    geo_auto: bool = True
+    geo_auto: bool = False  # Retain compatibility with settings saved by older clients.
     tun_stack: str = "profile"
     tun_mtu: int = 0
     ipv6_mode: str = "profile"
@@ -97,3 +99,4 @@ class Settings:
     client_point: dict[str, Any] = field(default_factory=dict)
     client_location_attempted: bool = False
     channel_preferences: dict[str, dict[str, Any]] = field(default_factory=dict)
+    client_reports: dict[str, bool] = field(default_factory=dict)

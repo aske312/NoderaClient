@@ -3,10 +3,11 @@ import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QTimer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QDialogButtonBox
 
-from nodera.install_service import Plan
+from nodera.install_service import AntivirusProtectionError, Plan
 from nodera.installer_ui import INSTALL_STYLE, InstallerWindow, OptionsDialog
 from nodera.theme import STYLE
 
@@ -65,3 +66,61 @@ def test_folder_settings_require_confirmation_and_validate_destination(tmp_path)
     dialog.close()
     parent.close()
     app.processEvents()
+
+
+def test_installer_offers_windows_security_after_antivirus_denial(tmp_path, monkeypatch):
+    class BlockedService(PreviewService):
+        def run(self, *args, **kwargs):
+            raise AntivirusProtectionError("Windows заблокировала файл.")
+
+    app = QApplication.instance()
+    opened = []
+    monkeypatch.setattr("nodera.installer_ui.QMessageBox.warning", lambda *args: None)
+    monkeypatch.setattr(
+        "nodera.installer_ui.QDesktopServices.openUrl",
+        lambda url: opened.append(url.toString()) or True,
+    )
+    window = InstallerWindow(BlockedService(), {"version": "0.0.3"}, "MIT", tmp_path / "product")
+    window.show()
+    app.processEvents()
+    wait(app, window)
+    assert window.security.isHidden()
+    window.activate()
+    wait(app, window)
+    assert window.security.isVisible()
+    assert not window.finished and window.primary.text() == "Повторить"
+
+    def open_security_settings():
+        dialog = app.activeModalWidget()
+        if dialog:
+            try:
+                buttons = dialog.findChild(QDialogButtonBox)
+                next(
+                    button
+                    for button in buttons.buttons()
+                    if button.text() == "Открыть настройки Windows"
+                ).click()
+            finally:
+                dialog.reject()
+
+    QTimer.singleShot(0, open_security_settings)
+    window.security.click()
+    assert opened == ["ms-settings:windowsdefender"]
+    window.close()
+
+
+def test_installer_offers_repair_if_executable_disappears_before_launch(tmp_path, monkeypatch):
+    app = QApplication.instance()
+    window = InstallerWindow(PreviewService(), {"version": "0.0.3"}, "MIT", tmp_path / "product")
+    window.show()
+    app.processEvents()
+    wait(app, window)
+    window.completed({"folder": window.folder, "reconnect": False, "warning": ""})
+
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("Nodera.exe")
+
+    monkeypatch.setattr("nodera.installer_ui.subprocess.Popen", missing)
+    window.activate()
+    assert window.isVisible() and window.security.isVisible() and window.repair.isVisible()
+    window.close()

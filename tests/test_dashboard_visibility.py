@@ -108,8 +108,7 @@ def test_session_and_traffic_visibility_follow_connection_lifecycle(tmp_path, tu
         app.processEvents()
 
 
-def test_first_location_retries_failure_and_marks_map_without_connection(tmp_path, monkeypatch):
-    # An old failed attempt flag must not prevent a new lookup.
+def test_client_location_retries_only_on_request_and_marks_map_on_save(tmp_path, monkeypatch):
     app, window = make_window(tmp_path, client_location_attempted=True)
     window.settings.geo_auto = True
     point = dict(code="DE", lat=50.1, lon=8.6, name="Frankfurt", source="ip-physical")
@@ -123,27 +122,26 @@ def test_first_location_retries_failure_and_marks_map_without_connection(tmp_pat
 
     monkeypatch.setattr("nodera.settings_ui.detect_client_location", detect)
     try:
-        window.auto_client_location()
+        window.detect_client_button.click()
         wait(app, window)
-        assert window.client_location_timer.isActive()
-        assert window.client_location_timer.interval() == 60000
         assert not window.world_map.client_point and not window.connected
-        window.client_location_timer.stop()
-        window.auto_client_location()
+        assert window.detect_client_button.isEnabled()
+        assert calls == [True]
+        window.detect_client_button.click()
         wait(app, window)
+        assert not Store(tmp_path).load_settings().client_point
+        window.save_settings()
         assert window.world_map.client_point["code"] == "DE"
         assert not window.world_map.connected and not window.connected
         assert Store(tmp_path).load_settings().client_point["code"] == "DE"
-        window.auto_client_location()
         assert len(calls) == 2
     finally:
         window.close()
         app.processEvents()
 
 
-def test_successful_location_remains_visible_if_settings_cannot_be_saved(tmp_path, monkeypatch):
+def test_manual_location_remains_in_settings_if_save_fails(tmp_path, monkeypatch):
     app, window = make_window(tmp_path)
-    window.settings.geo_auto = True
     point = dict(code="DE", lat=50.1, lon=8.6, name="Frankfurt", source="ip-physical")
     monkeypatch.setattr("nodera.settings_ui.detect_client_location", lambda: point)
 
@@ -151,13 +149,15 @@ def test_successful_location_remains_visible_if_settings_cannot_be_saved(tmp_pat
         raise OSError("Read-only directory")
 
     monkeypatch.setattr(window.store, "save_settings", unavailable)
+    errors = []
+    monkeypatch.setattr(window, "error", errors.append)
     try:
-        window.auto_client_location()
+        window.detect_client_button.click()
         wait(app, window)
-        window.refresh_dashboard()
-        assert window.world_map.client_point["code"] == "DE"
-        assert not window.connected
-        assert "Не удалось сохранить" in window.client_point_result.text()
+        window.save_settings()
+        assert not window.world_map.client_point
+        assert window.client_country_setting.currentData() == "DE"
+        assert errors
     finally:
         window.close()
         app.processEvents()

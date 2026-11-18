@@ -1,9 +1,11 @@
 import hashlib
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from nodera.install_service import (
+    AntivirusProtectionError,
     Installed,
     InstallService,
     Plan,
@@ -125,9 +127,29 @@ def test_preview_cannot_invoke_installation_or_create_destination(tmp_path, monk
     assert not root.exists() and not (tmp_path / "product").exists()
 
 
-@pytest.mark.parametrize("fail_engine", [False, True])
+@pytest.mark.parametrize("code", [225, 226])
+def test_execute_reports_windows_antivirus_codes(tmp_path, monkeypatch, code):
+    service = InstallService({}, {}, tmp_path / "engine.exe", tmp_path / "data")
+    log = tmp_path / "install.log"
+    error = OSError("blocked")
+    error.winerror = code
+
+    def blocked(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(subprocess, "run", blocked)
+    with pytest.raises(AntivirusProtectionError, match=str(code)):
+        service._execute([str(service.engine)], log)
+
+    log.write_text(f"Error {code}: blocked", encoding="utf-8")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a, 4))
+    with pytest.raises(AntivirusProtectionError, match=str(code)):
+        service._execute([str(service.engine)], log)
+
+
+@pytest.mark.parametrize("problem", [None, "engine", "blocked", "missing"])
 def test_replacement_stops_then_backs_up_uninstalls_and_restores_data(
-    tmp_path, monkeypatch, fail_engine
+    tmp_path, monkeypatch, problem
 ):
     installed, manifest = payload(tmp_path / "product", b"old")
     installed = Installed(installed.folder, "0.0.2", "old", installed.uninstaller)
@@ -156,19 +178,24 @@ def test_replacement_stops_then_backs_up_uninstalls_and_restores_data(
             settings.unlink()  # Simulates even an old uninstaller that removes user data.
         else:
             events.append("startup")
+            if problem == "blocked":
+                raise AntivirusProtectionError("blocked")
 
     def install(*args):
         events.append("install")
-        if fail_engine:
+        if problem == "engine":
             raise ClientError("disk error")
+        if problem == "missing":
+            (installed.folder / "Nodera.exe").unlink()
 
     monkeypatch.setattr("ctypes.windll.shell32.IsUserAnAdmin", lambda: True)
     monkeypatch.setattr("nodera.install_service.find_installed", lambda: installed)
     monkeypatch.setattr("nodera.install_service.stop_client", stop)
     monkeypatch.setattr(service, "_execute", execute)
     monkeypatch.setattr(service, "_engine", install)
-    if fail_engine:
-        with pytest.raises(ClientError, match="Данные|данные"):
+    if problem:
+        error_class = ClientError if problem == "engine" else AntivirusProtectionError
+        with pytest.raises(error_class, match="Данные|данные"):
             service.run(Plan("replace", installed.folder, installed), True, False, lambda _: None)
     else:
         result = service.run(

@@ -306,6 +306,9 @@ class ProfilesMixin:
             selector.fit_text()
         self.library_count.setText(f"Сохранено подписок: {len(self.library.profiles)}")
         pro = self.is_pro_profile(self.profile)
+        from nodera.settings_ui import refresh_report_settings
+
+        refresh_report_settings(self)
         for badge in (self.home_pro_badge, self.connections_pro_badge):
             badge.setVisible(pro)
             badge.setToolTip("PRO")
@@ -518,7 +521,6 @@ class ProfilesMixin:
             self.set_disconnected()
             self.apply_subscription_settings(settings)
             self.refresh_profile()
-            self.schedule_location_check()
             self.update_retry_at = self.profile_retry_at.get(profile.id, 0)
             self.pending_connect = connected
             self.log("Выбрана подписка «" + profile.name + "».")
@@ -673,7 +675,6 @@ class ProfilesMixin:
                 self.rules_pending.setText("")
                 self.connection_hint = "Подписка применена без переподключения"
             self.refresh_profile()
-            self.schedule_location_check(updated)
             if groups is not None:
                 self.hint.setText(self.connection_hint)
                 self.log("Подписка обновлена и применена к текущему сеансу.")
@@ -987,7 +988,6 @@ class ProfilesMixin:
                     self.delay_results.clear()
                     self.set_groups(groups)
                 self.refresh_profile()
-                self.schedule_location_check()
             self.receive_channel_result(accepted)
             if error:
                 self.channel_status.setText(error + " " + self.channel_status.text())

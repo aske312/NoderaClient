@@ -1,7 +1,6 @@
 import threading
 import time
 from dataclasses import replace
-from types import MethodType
 
 import pytest
 from PySide6.QtCore import QTimer
@@ -13,9 +12,7 @@ from nodera.models import Profile, ProfileLibrary, Settings
 from nodera.profile_view import is_pro_subscription
 from nodera.storage import Store
 from nodera.ui import MainWindow
-from nodera.workbench import WorkbenchMixin, breakable_text
-
-schedule_locations = WorkbenchMixin.schedule_location_check
+from nodera.workbench import breakable_text
 
 
 def make_window(tmp_path, count=2, name="Рабочая подписка с длинным названием"):
@@ -43,7 +40,7 @@ def wait(app, window):
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         app.processEvents()
-        if not window.task and not window.geo_task and not window.pending_geo_profiles:
+        if not window.task and not window.geo_task:
             return
         QTest.qWait(5)
     raise AssertionError("Background checks did not finish")
@@ -121,17 +118,24 @@ def test_subscription_detail_updates_and_search_does_not_change_active_profile(t
         app.processEvents()
 
 
-def test_real_connection_automatically_checks_all_routes_even_above_64(tmp_path, monkeypatch):
+def test_real_connection_checks_only_the_manually_selected_route(tmp_path, monkeypatch):
     app, window = make_window(tmp_path, count=70)
     window.settings = replace(window.settings, geo_auto=True)
     monkeypatch.setattr("nodera.geolocation.GeoClient.check_node", fake_location)
-    window.schedule_location_check = MethodType(schedule_locations, window)
     monkeypatch.setattr(window, "check_connection", lambda: None)
     monkeypatch.setattr(window, "periodic_delays", lambda: None)
     try:
         window.set_connected("test", verify=True)
         wait(app, window)
-        assert len(window.geo_for_profile()) == 70
+        assert window.geo_client is None
+        assert not window.geo_for_profile()
+        window.navigate(4)
+        window.server_tabs.setCurrentIndex(1)
+        selected = window.current_node()
+        assert selected
+        window.geo_determine_button.click()
+        wait(app, window)
+        assert set(window.geo_for_profile()) == {selected}
         assert window.address_table.rowCount() == 1
     finally:
         window.connected = False
@@ -139,11 +143,10 @@ def test_real_connection_automatically_checks_all_routes_even_above_64(tmp_path,
         app.processEvents()
 
 
-def test_subscription_update_automatically_refreshes_ip_without_connection(tmp_path, monkeypatch):
+def test_subscription_update_stays_offline_until_manual_ip_check(tmp_path, monkeypatch):
     app, window = make_window(tmp_path)
     window.settings = replace(window.settings, geo_auto=True)
     monkeypatch.setattr("nodera.geolocation.GeoClient.check_node", fake_location)
-    window.schedule_location_check = MethodType(schedule_locations, window)
     fetched = Profile(
         "Updated",
         window.profile.url,
@@ -155,13 +158,16 @@ def test_subscription_update_automatically_refreshes_ip_without_connection(tmp_p
         window.load_subscription(window.profile.url, window.profile.name)
         wait(app, window)
         assert not window.connected
+        assert window.geo_client is None
+        window.check_locations()
+        wait(app, window)
         assert set(window.geo_for_profile()) == {"new-route"}
     finally:
         window.close()
         app.processEvents()
 
 
-def test_updated_profile_replaces_an_inflight_ip_check(tmp_path, monkeypatch):
+def test_manual_ip_check_discards_results_for_changed_endpoint(tmp_path, monkeypatch):
     app, window = make_window(tmp_path, count=1)
     window.settings = replace(window.settings, geo_auto=True)
     entered, release = threading.Event(), threading.Event()
@@ -176,23 +182,22 @@ def test_updated_profile_replaces_an_inflight_ip_check(tmp_path, monkeypatch):
         return fake_location(client, profile, name, *args)
 
     monkeypatch.setattr("nodera.geolocation.GeoClient.check_node", check)
-    window.schedule_location_check = MethodType(schedule_locations, window)
     try:
-        window.schedule_location_check()
+        window.check_locations()
         deadline = time.monotonic() + 2
         while not entered.is_set() and time.monotonic() < deadline:
             app.processEvents()
             QTest.qWait(5)
         assert entered.is_set()
-        old_task = window.geo_task
         window.profile = replace(
             window.profile,
             config={"proxies": [{"name": "route-0", "type": "ss", "server": "1.1.1.1"}]},
         )
         window.library = window.library.upsert(window.profile)
-        window.schedule_location_check()
-        assert old_task.cancelled.is_set()
         release.set()
+        wait(app, window)
+        assert not window.geo_for_profile()
+        window.check_locations()
         wait(app, window)
         assert hosts == ["8.8.8.8", "1.1.1.1"]
         assert window.geo_for_profile()["route-0"]["endpoints"][0]["host"] == "1.1.1.1"
@@ -254,10 +259,9 @@ def test_pro_tags_and_compact_subscription_card(tmp_path):
 
 
 @pytest.mark.parametrize("has_profiles", [False, True])
-def test_saved_subscriptions_are_scheduled_at_startup(tmp_path, monkeypatch, has_profiles):
+def test_saved_subscriptions_do_not_start_geolocation(tmp_path, has_profiles):
     app, window = make_window(tmp_path)
-    calls = []
-    monkeypatch.setattr(window, "schedule_location_check", lambda p: calls.append(p.id))
+    window.settings = replace(window.settings, geo_auto=True)
     try:
         if has_profiles:
             second = Profile("Second", "", {"proxies": []}, "")
@@ -266,7 +270,9 @@ def test_saved_subscriptions_are_scheduled_at_startup(tmp_path, monkeypatch, has
             window.profile = None
             window.library = ProfileLibrary()
         app.processEvents()
-        assert calls == [p.id for p in window.library.profiles]
+        assert window.geo_client is None
+        assert window.geo_task is None
+        assert not window.inspections
     finally:
         window.close()
         app.processEvents()

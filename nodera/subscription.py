@@ -264,6 +264,13 @@ def fetch_profile(
                     if claims
                     else {}
                 )
+                reports_version = (
+                    1 if claims and response.headers.get("x-nodera-reports-version") == "1" else 0
+                )
+                reports_diagnostics = reports_version == 1 and "diagnostics" in {
+                    item.strip()
+                    for item in response.headers.get("x-nodera-reports-features", "").split(",")
+                }
                 usage = {}
                 for part in response.headers.get("subscription-userinfo", "").split(";"):
                     key, _, value = part.strip().partition("=")
@@ -314,4 +321,6 @@ def fetch_profile(
         datetime.now(timezone.utc).isoformat(),
         usage,
         pro_verification=pro_verification,
+        reports_version=reports_version,
+        reports_diagnostics=reports_diagnostics,
     )

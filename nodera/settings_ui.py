@@ -1,9 +1,8 @@
 """Padded setting rows, switches, and client map-point controls."""
 
-from dataclasses import replace
 from datetime import datetime, timezone
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QFrame,
@@ -16,8 +15,10 @@ from PySide6.QtWidgets import (
 )
 
 from nodera.client_location import detect_client_location
+from nodera.client_reports import supported as reports_supported
 from nodera.controls import ComboBox, CoordinateBox, NumberBox, Switch
 from nodera.locations import country, map_data
+from nodera.profile_view import is_pro_subscription
 from nodera.server_assets import flag_pixmap
 from nodera.widgets import label
 
@@ -147,6 +148,24 @@ def build_settings(self):
         [(f"{value} мин", value) for value in (1, 5, 15, 30)], self.settings.flow_history_minutes
     )
     setting(form, "Хранить завершённые в памяти", self.flow_history_setting)
+    self.report_sharing = switch(False)
+    setting(
+        form,
+        "Передавать статистику серверу",
+        self.report_sharing,
+        "Для активной PRO-подписки. Состояние и счётчики без адресов сайтов и процессов.",
+    )
+    self.report_status = label("", "muted", True)
+    self.report_status.setContentsMargins(12, 0, 12, 3)
+    form.addWidget(self.report_status)
+    self.report_settings_profile_id = None
+    refresh_report_settings(self, force=True)
+    self.report_timer = QTimer(self)
+    self.report_timer.setInterval(1000)
+    self.report_timer.timeout.connect(
+        lambda: self.settings_tabs.isVisible() and refresh_report_status(self)
+    )
+    self.report_timer.start()
     general.addStretch()
 
     form = section(network, "Локальная сеть")
@@ -165,13 +184,6 @@ def build_settings(self):
         [("Из профиля", "profile"), ("Включён", "on"), ("Выключен", "off")], self.settings.ipv6_mode
     )
     setting(form, "IPv6", self.ipv6_setting)
-    self.geo_auto_check = switch(self.settings.geo_auto)
-    setting(
-        form,
-        "Определять IP и геолокацию в фоне",
-        self.geo_auto_check,
-        "Фоновое определение маршрутов при запуске, подключении и обновлении подписки. Вручную — Инструменты → Геолокация.",
-    )
     flush = self.flush_dns_button = QPushButton("Очистить")
     flush.clicked.connect(
         lambda: (
@@ -309,6 +321,52 @@ def build_settings(self):
     ]
 
 
+def refresh_report_settings(self, *, force=False):
+    profile = self.profile
+    pro = is_pro_subscription(profile)
+    identity = profile.id if pro else None
+    self.report_sharing.setting_row.setVisible(pro)
+    self.report_status.setVisible(pro)
+    self.report_sharing.setEnabled(pro and reports_supported(profile))
+    if force or identity != self.report_settings_profile_id:
+        self.report_sharing.setChecked(pro and self.settings.client_reports.get(identity) is True)
+        self.report_settings_profile_id = identity
+    refresh_report_status(self)
+
+
+def report_preferences(self):
+    preferences = dict(self.settings.client_reports)
+    profile = self.profile
+    if reports_supported(profile) and self.report_settings_profile_id == profile.id:
+        preferences[profile.id] = self.report_sharing.isChecked()
+    return preferences
+
+
+def refresh_report_status(self):
+    profile = self.profile
+    if not is_pro_subscription(profile):
+        self.report_status.setText("")
+        return
+    if not reports_supported(profile):
+        text = "Обновите подписку для передачи статистики."
+    elif self.settings.client_reports.get(profile.id) is not True:
+        text = "Выключено"
+    else:
+        state, at = self.client_reporter.snapshot(profile.id)
+        text = {
+            "disabled": "Выключено",
+            "waiting": "Ожидает подключения",
+            "sent": f"Отправлено · {at}",
+            "limited": "Отправка отложена сервером",
+            "unknown": "Результат отправки не подтверждён",
+            "unavailable": "Нет связи с сервером",
+            "unsupported": "Сервер не принимает статистику. Обновите подписку.",
+        }.get(state, "Ожидает подключения")
+    if reports_supported(profile) and profile.reports_diagnostics is not True:
+        text += " · Только счётчики"
+    self.report_status.setText(text)
+
+
 def apply_point(self, point):
     self._loading_client_point = True
     self.client_country_setting.setCurrentIndex(
@@ -352,21 +410,13 @@ def client_point_value(self):
     }
 
 
-def detect_point(self, automatic=False):
+def detect_point(self):
     if self.closing or "client-location" in self.inspections:
         return
-    original_point = dict(self.settings.client_point)
     self.detect_client_button.setEnabled(False)
     self.client_point_result.setText("Определение через физический сетевой интерфейс…")
 
     def done(point):
-        if automatic and (
-            self.settings.client_point != original_point
-            or self.client_point_source == "manual"
-            and client_point_value(self)
-        ):
-            self.detect_client_button.setEnabled(True)
-            return
         apply_point(self, point)
         self.client_point_source = point["source"]
         self.client_detected_at = point.get("detected_at", datetime.now(timezone.utc).isoformat())
@@ -374,27 +424,10 @@ def detect_point(self, automatic=False):
         self.client_point_result.setText(
             "Приблизительно: " + point["name"] + ". Сохраните настройки для отображения на карте."
         )
-        if automatic:
-            settings = replace(
-                self.settings, client_point=client_point_value(self), client_location_attempted=True
-            )
-            # Show a successful lookup even if saving to disk is temporarily unavailable.
-            self.settings = settings
-            self.refresh_dashboard()
-            try:
-                self.store.save_settings(settings)
-            except OSError:
-                self.client_point_result.setText(
-                    "Не удалось сохранить точку клиента. Нажмите «Сохранить»."
-                )
-                return
-            self.client_point_result.setText("По IP: " + point["name"] + " · Сохранено")
 
     def failed(message):
         self.detect_client_button.setEnabled(True)
         self.client_point_result.setText(message)
-        if automatic and not self.closing and not self.settings.client_point:
-            self.client_location_timer.start(60000)
 
     self.start_inspection(
         "client-location", detect_client_location, done, failed, session_bound=False

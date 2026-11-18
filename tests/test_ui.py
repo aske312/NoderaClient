@@ -66,8 +66,6 @@ def test_tools_are_inside_settings_and_map_fills_home(tmp_path):
         6,
         7,
         8,
-        window.geodata_page_index,
-        window.geolocation_page_index,
     }
     assert window.settings_tabs.indexOf(window.events_section) >= 0
     assert window.settings_tabs.indexOf(window.diagnostics_section) >= 0
@@ -81,6 +79,7 @@ def test_tools_are_inside_settings_and_map_fills_home(tmp_path):
     window.navigate(7)
     assert window.application_values["Версия приложения"]
     assert window.application_values["Ядро"].startswith("Mihomo ")
+    assert window.update_check.isVisible()
     window.close()
     app.processEvents()
 
@@ -101,6 +100,9 @@ def test_address_table_covers_profile_not_only_selected_node(tmp_path):
     )
     window = MainWindow(Store(tmp_path), Settings(update_hours=0), profile)
     window.timer.stop()
+    assert window.address_table.rowCount() == 0
+    window.navigate(4)
+    window.server_tabs.setCurrentIndex(1)
     assert window.address_table.rowCount() == 2
     counts = [window.address_table.item(row, 5).text() for row in range(2)]
     assert sorted(counts) == ["1", "2"]

@@ -54,7 +54,6 @@ def test_first_subscription_is_added_from_home_before_subscription_page_is_avail
     app = QApplication.instance() or QApplication([])
     window = MainWindow(Store(tmp_path), Settings(geo_auto=False, update_hours=0), None)
     window.timer.stop()
-    window.client_location_timer.stop()
     opened = []
     monkeypatch.setattr(SubscriptionDialog, "exec", lambda dialog: opened.append(True) or 0)
     window.show()

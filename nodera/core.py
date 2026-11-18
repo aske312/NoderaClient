@@ -672,6 +672,17 @@ class Core:
                     "uptime": int(now - self.started_at),
                     "connections": len(data.get("connections") or []),
                     "flows": data.get("connections") or [],
+                    "report_counters": {
+                        "upload": data.get("uploadTotal")
+                        if type(data.get("uploadTotal")) is int
+                        else None,
+                        "download": data.get("downloadTotal")
+                        if type(data.get("downloadTotal")) is int
+                        else None,
+                        "connections": len(data["connections"])
+                        if isinstance(data.get("connections"), list)
+                        else None,
+                    },
                 }
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             raise ClientError("Статистика ядра временно недоступна.") from exc
