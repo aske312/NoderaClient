@@ -23,12 +23,12 @@ from nodera.server_assets import flag_pixmap
 from nodera.widgets import label
 
 
-def selector(values, current):
+def selector(values, current, *, width=190):
     widget = ComboBox()
     for caption, value in values:
         widget.addItem(caption, value)
     widget.setCurrentIndex(max(0, widget.findData(current)))
-    widget.setFixedWidth(190)
+    widget.setFixedWidth(width)
     return widget
 
 
@@ -45,13 +45,24 @@ def section(column, title):
     return layout
 
 
+def paired_sections(column, left_title, right_title):
+    row = QHBoxLayout()
+    row.setSpacing(8)
+    column.addLayout(row)
+    left, right = section(row, left_title), section(row, right_title)
+    for index, card in enumerate((left, right)):
+        row.setStretch(index, 1)
+        row.setAlignment(card.parentWidget(), Qt.AlignmentFlag.AlignTop)
+    return left, right
+
+
 def setting(layout, caption, field, detail=""):
     frame = QWidget()
     frame.setObjectName("settingRow")
     row = QHBoxLayout(frame)
     row.setContentsMargins(12, 3, 12, 3)
     row.setSpacing(12)
-    caption_label = label(caption)
+    caption_label = label(caption, wrap=True)
     caption_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
     if detail:
         caption_label.setToolTip(detail)
@@ -137,20 +148,23 @@ def build_settings(self):
     setting(form, "Обновление подписок", self.update_interval)
     general.addStretch()
 
-    form = section(network, "Локальная сеть")
+    form, monitoring = paired_sections(network, "Локальная сеть", "Наблюдение за соединениями")
     self.port = number(self.settings.mixed_port, 65535)
     self.port.setSpecialValueText("Автоматически")
     setting(form, "Порт HTTP / SOCKS5", self.port)
     self.stack_setting = selector(
         [("Из профиля", "profile"), ("Mixed", "mixed"), ("System", "system"), ("gVisor", "gvisor")],
         self.settings.tun_stack,
+        width=130,
     )
     setting(form, "Стек TUN", self.stack_setting)
     self.mtu_setting = number(self.settings.tun_mtu, 9000)
     self.mtu_setting.setSpecialValueText("Из профиля")
     setting(form, "MTU", self.mtu_setting)
     self.ipv6_setting = selector(
-        [("Из профиля", "profile"), ("Включён", "on"), ("Выключен", "off")], self.settings.ipv6_mode
+        [("Из профиля", "profile"), ("Включён", "on"), ("Выключен", "off")],
+        self.settings.ipv6_mode,
+        width=130,
     )
     setting(form, "IPv6", self.ipv6_setting)
     flush = self.flush_dns_button = QPushButton("Очистить")
@@ -163,17 +177,21 @@ def build_settings(self):
     )
     setting(form, "DNS-кэш ядра", flush)
 
-    form = section(network, "Наблюдение за соединениями")
+    form = monitoring
     self.poll_interval = selector(
-        [(f"{value} с", value) for value in (1, 3, 5, 10)], self.settings.poll_seconds
+        [(f"{value} с", value) for value in (1, 3, 5, 10)], self.settings.poll_seconds, width=130
     )
     setting(form, "Опрос в фоне", self.poll_interval)
     self.flow_poll_setting = selector(
-        [(f"{value} с", value) for value in (1, 2, 3, 5, 10)], self.settings.flow_poll_seconds
+        [(f"{value} с", value) for value in (1, 2, 3, 5, 10)],
+        self.settings.flow_poll_seconds,
+        width=130,
     )
     setting(form, "Обновлять список соединений", self.flow_poll_setting)
     self.flow_history_setting = selector(
-        [(f"{value} мин", value) for value in (1, 5, 15, 30)], self.settings.flow_history_minutes
+        [(f"{value} мин", value) for value in (1, 5, 15, 30)],
+        self.settings.flow_history_minutes,
+        width=130,
     )
     setting(form, "Хранить завершённые в памяти", self.flow_history_setting)
     self.report_sharing = switch(False)
@@ -247,7 +265,7 @@ def build_settings(self):
     self.client_point_result.setContentsMargins(16, 4, 16, 4)
     mapping.addStretch()
 
-    form = section(logging, "Журнал приложения")
+    form, flow_log = paired_sections(logging, "Журнал приложения", "Отдельный журнал соединений")
     self.log_level_setting = selector(
         [
             ("Обычный (info)", "info"),
@@ -256,6 +274,7 @@ def build_settings(self):
             ("Ошибки", "error"),
         ],
         self.settings.log_level,
+        width=156,
     )
     setting(form, "Уровень ядра", self.log_level_setting)
     self.log_limit_setting = number(self.settings.log_limit, 20000, 500)
@@ -263,7 +282,7 @@ def build_settings(self):
     setting(form, "Записей в интерфейсе", self.log_limit_setting)
     self.log_save_check = switch(self.settings.save_logs)
     setting(form, "Сохранять журнал приложения", self.log_save_check)
-    form = section(logging, "Отдельный журнал соединений")
+    form = flow_log
     self.connection_log_check = switch(self.settings.save_connection_logs)
     setting(
         form,
@@ -272,7 +291,9 @@ def build_settings(self):
         "connections.jsonl · Приложение, домен, маршрут, байты",
     )
     self.connection_log_size = selector(
-        [(f"{value} МБ", value) for value in (4, 8, 16, 32)], self.settings.connection_log_mb
+        [(f"{value} МБ", value) for value in (4, 8, 16, 32)],
+        self.settings.connection_log_mb,
+        width=130,
     )
     setting(
         form,
@@ -281,7 +302,9 @@ def build_settings(self):
         "Три предыдущих файла сохраняются при ротации",
     )
     self.connection_log_interval_setting = selector(
-        [(f"{value} с", value) for value in (5, 15, 30, 60)], self.settings.connection_log_interval
+        [(f"{value} с", value) for value in (5, 15, 30, 60)],
+        self.settings.connection_log_interval,
+        width=130,
     )
     setting(form, "Запись трафика активных потоков", self.connection_log_interval_setting)
     open_logs = QPushButton("Открыть папку логов")

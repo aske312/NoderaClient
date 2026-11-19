@@ -4,7 +4,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QFrame
 
 from nodera.controls import Switch
 from nodera.models import Settings
@@ -46,6 +46,27 @@ def test_switches_and_advanced_settings_are_saved_and_applied(tmp_path):
     window.quit_requested = True
     window.close()
     app.processEvents()
+
+
+def test_network_and_log_settings_cards_fit_side_by_side(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Store(tmp_path), Settings(update_hours=0), None)
+    window.show()
+    window.navigate(2)
+    try:
+        for tab in (1, 3):
+            window.settings_tabs.setCurrentIndex(tab)
+            app.processEvents()
+            page = window.settings_tabs.currentWidget()
+            left, right = page.findChildren(QFrame, "settingsCard")
+            assert left.y() == right.y()
+            assert left.geometry().right() < right.x()
+            assert page.rect().contains(left.geometry())
+            assert page.rect().contains(right.geometry())
+            viewport = window.stack.currentWidget().viewport()
+            assert viewport.rect().contains(window.save_button.mapTo(viewport, QPoint()))
+    finally:
+        window.exit_app()
 
 
 def test_client_point_validation_rejects_bad_coordinates_and_paths():
