@@ -249,6 +249,7 @@ class FlowsMixin:
             not self.connected
             or self.closing
             or self.task
+            or self.poll_task
             or not self.core.running
             or "flows" in self.inspections
         ):

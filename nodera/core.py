@@ -620,6 +620,7 @@ class Core:
             timeout=1,
             headers={"Authorization": f"Bearer {self.secret}"},
             trust_env=False,
+            verify=False,  # The controller only speaks plain HTTP over loopback.
         )
 
     def connection_snapshot(self) -> list:

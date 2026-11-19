@@ -24,6 +24,27 @@ def wait(app, predicate):
     assert predicate()
 
 
+def test_connection_poller_shares_due_snapshots_and_retries_busy_ticks(tmp_path, monkeypatch):
+    window = MainWindow(Store(tmp_path), Settings(update_hours=0), None)
+    window.connected = window.network_checks_enabled = True
+    calls = []
+    monkeypatch.setattr(window, "capture_flows", lambda: calls.append("flows"))
+    monkeypatch.setattr(window, "poll", lambda *, update_flows: calls.append(update_flows))
+
+    for _ in range(2):
+        window.poll_connections()
+    window.inspections["flows"] = object()
+    window.poll_connections()
+    del window.inspections["flows"]
+    window.poll_connections()
+    assert calls == ["flows", "flows", True]
+
+    window.stack.setCurrentIndex(8)
+    window.poll_connections()
+    window.poll_connections()
+    assert calls == ["flows", "flows", True, True, True]
+
+
 @pytest.mark.parametrize("connected", [False, True])
 def test_app_update_download_and_installer_wait_for_user_without_closing_client(
     tmp_path, monkeypatch, connected

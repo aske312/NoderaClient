@@ -440,7 +440,6 @@ def test_applications_keep_updating_during_delay_checks_on_other_screens(tmp_pat
         assert not window.inspections
         assert window.delay_results[(window.profile.id, "route-0")]["value"] == 25
 
-        window.flow_timer.start(100000)
         monkeypatch.setattr(
             window.core,
             "status",
@@ -455,7 +454,7 @@ def test_applications_keep_updating_during_delay_checks_on_other_screens(tmp_pat
             ),
         )
         monkeypatch.setattr(window.core, "groups", lambda: window.groups_data)
-        window.poll()
+        window.poll(update_flows=False)
         deadline = time.monotonic() + 2
         while window.poll_task and time.monotonic() < deadline:
             app.processEvents()

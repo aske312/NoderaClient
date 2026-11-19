@@ -670,16 +670,7 @@ class WorkbenchMixin:
         self.report_client_state()
         self.port.setValue(settings.mixed_port)
         self.mtu_setting.setValue(settings.tun_mtu)
-        self.timer.setInterval(
-            (
-                settings.flow_poll_seconds
-                if self.stack.currentIndex() == 8
-                else settings.poll_seconds
-            )
-            * 1000
-        )
         self.flow_monitor.retention_seconds = settings.flow_history_minutes * 60
-        self.flow_timer.setInterval(settings.flow_poll_seconds * 1000)
         self.journal.configure(settings.log_limit, settings.save_logs)
         self.core.trace.configure(settings.log_limit, settings.save_logs)
         self.core.connection_log.configure(

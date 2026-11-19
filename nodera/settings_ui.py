@@ -135,37 +135,6 @@ def build_settings(self):
         self.settings.update_hours,
     )
     setting(form, "Обновление подписок", self.update_interval)
-    form = section(general, "Наблюдение за соединениями")
-    self.poll_interval = selector(
-        [(f"{value} с", value) for value in (1, 3, 5, 10)], self.settings.poll_seconds
-    )
-    setting(form, "Опрос в фоне", self.poll_interval)
-    self.flow_poll_setting = selector(
-        [(f"{value} с", value) for value in (1, 2, 3, 5, 10)], self.settings.flow_poll_seconds
-    )
-    setting(form, "Обновлять список соединений", self.flow_poll_setting)
-    self.flow_history_setting = selector(
-        [(f"{value} мин", value) for value in (1, 5, 15, 30)], self.settings.flow_history_minutes
-    )
-    setting(form, "Хранить завершённые в памяти", self.flow_history_setting)
-    self.report_sharing = switch(False)
-    setting(
-        form,
-        "Передавать статистику серверу",
-        self.report_sharing,
-        "Для активной PRO-подписки. Состояние и счётчики без адресов сайтов и процессов.",
-    )
-    self.report_status = label("", "muted", True)
-    self.report_status.setContentsMargins(12, 0, 12, 3)
-    form.addWidget(self.report_status)
-    self.report_settings_profile_id = None
-    refresh_report_settings(self, force=True)
-    self.report_timer = QTimer(self)
-    self.report_timer.setInterval(1000)
-    self.report_timer.timeout.connect(
-        lambda: self.settings_tabs.isVisible() and refresh_report_status(self)
-    )
-    self.report_timer.start()
     general.addStretch()
 
     form = section(network, "Локальная сеть")
@@ -193,6 +162,38 @@ def build_settings(self):
         )
     )
     setting(form, "DNS-кэш ядра", flush)
+
+    form = section(network, "Наблюдение за соединениями")
+    self.poll_interval = selector(
+        [(f"{value} с", value) for value in (1, 3, 5, 10)], self.settings.poll_seconds
+    )
+    setting(form, "Опрос в фоне", self.poll_interval)
+    self.flow_poll_setting = selector(
+        [(f"{value} с", value) for value in (1, 2, 3, 5, 10)], self.settings.flow_poll_seconds
+    )
+    setting(form, "Обновлять список соединений", self.flow_poll_setting)
+    self.flow_history_setting = selector(
+        [(f"{value} мин", value) for value in (1, 5, 15, 30)], self.settings.flow_history_minutes
+    )
+    setting(form, "Хранить завершённые в памяти", self.flow_history_setting)
+    self.report_sharing = switch(False)
+    setting(
+        form,
+        "Передавать статистику серверу",
+        self.report_sharing,
+        "Для активной PRO-подписки. Состояние и счётчики без адресов сайтов и процессов.",
+    )
+    self.report_status = label("", "muted", True)
+    self.report_status.setContentsMargins(12, 0, 12, 3)
+    form.addWidget(self.report_status)
+    self.report_settings_profile_id = None
+    refresh_report_settings(self, force=True)
+    self.report_timer = QTimer(self)
+    self.report_timer.setInterval(1000)
+    self.report_timer.timeout.connect(
+        lambda: self.report_status.isVisible() and refresh_report_status(self)
+    )
+    self.report_timer.start()
     network.addStretch()
 
     form = section(mapping, "Карта маршрута")

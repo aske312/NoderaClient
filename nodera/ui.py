@@ -111,6 +111,9 @@ class MainWindow(
         )
         self.task = None
         self.poll_task = None
+        self._poll_tick = 0
+        self._last_status_poll = 0
+        self._last_flow_poll = 0
         self.inspections = {}
         self.geo_task = None
         self.geo_render_timer = QTimer(self)
@@ -175,15 +178,12 @@ class MainWindow(
             else "Nodera готова. Добавьте подписку для подключения."
         )
         self.timer = QTimer(self)
-        self.timer.setInterval(self.settings.poll_seconds * 1000)
-        self.timer.timeout.connect(self.poll)
-        self.timer.start()
+        self.timer.setInterval(1000)
+        self.timer.timeout.connect(self.poll_connections)
         self.delay_timer = QTimer(self)
         self.delay_timer.setInterval(15000)
         self.delay_timer.timeout.connect(self.periodic_delays)
         self.delay_timer.start()
-        self.flow_timer = QTimer(self)
-        self.flow_timer.timeout.connect(self.capture_flows)
         self.log_timer = QTimer(self)
         self.log_timer.setInterval(500)
         self.log_timer.timeout.connect(self.ingest_core_logs)
@@ -271,11 +271,6 @@ class MainWindow(
         if index == 4:
             self.render_addresses()
         self.navigation.set_current(index)
-        if hasattr(self, "timer"):
-            self.timer.setInterval(
-                (self.settings.flow_poll_seconds if index == 8 else self.settings.poll_seconds)
-                * 1000
-            )
         if index == 8:
             self.render_flows(force=True)
             if hasattr(self, "timer") and self.connected:
@@ -1099,8 +1094,9 @@ class MainWindow(
         self.server_result.setText("")
         self.navigation_status.setText(self.state.text())
         self.update_route_pill()
+        self._poll_tick = self._last_status_poll = self._last_flow_poll = 0
+        self.timer.start()
         if verify:
-            self.flow_timer.start(self.settings.flow_poll_seconds * 1000)
             QTimer.singleShot(0, self.capture_flows)
             self.check_connection()
             QTimer.singleShot(0, self.periodic_delays)
@@ -1109,7 +1105,7 @@ class MainWindow(
     def set_disconnected(self):
         self.report_client_state("disconnected")
         self.cancel_network_recovery()
-        self.flow_timer.stop()
+        self.timer.stop()
         self.delay_results.clear()
         self.delay_status.setText("Задержка · Автопроверка после подключения, каждые 15 с")
         self.flow_monitor.clear()
@@ -1145,8 +1141,40 @@ class MainWindow(
         self.hint.setToolTip(message)
         self.error(message)
 
-    def poll(self):
-        if not self.connected or self.task or self.poll_task or self.closing:
+    def poll_connections(self):
+        self._poll_tick += 1
+        if (
+            not self.connected
+            or self.task
+            or self.poll_task
+            or self.closing
+            or "flows" in self.inspections
+        ):
+            return
+
+        flow_period = self.settings.flow_poll_seconds
+        showing_flows = self.stack.currentIndex() == 8
+        status_period = flow_period if showing_flows else self.settings.poll_seconds
+        watch_flows = self.network_checks_enabled
+        flow_due = watch_flows and self._poll_tick - self._last_flow_poll >= flow_period
+        if self._poll_tick - self._last_status_poll >= status_period:
+            self._last_status_poll = self._poll_tick
+            update_flows = flow_due or showing_flows or not watch_flows
+            if update_flows:
+                self._last_flow_poll = self._poll_tick
+            self.poll(update_flows=update_flows)
+        elif flow_due and not showing_flows:
+            self._last_flow_poll = self._poll_tick
+            self.capture_flows()
+
+    def poll(self, *, update_flows=True):
+        if (
+            not self.connected
+            or self.task
+            or self.poll_task
+            or self.closing
+            or "flows" in self.inspections
+        ):
             return
 
         def updated(data):
@@ -1168,9 +1196,9 @@ class MainWindow(
             self.stats[0].setText(size_text(data["download"]))
             self.stats[1].setText(size_text(data["upload"]))
             self.stats[2].setText(str(data["connections"]))
-            if not self.flow_timer.isActive():
+            if update_flows:
                 self.flow_monitor.update(data.get("flows", []))
-            self.render_flows()
+                self.render_flows()
             self.stat_rates[0].setText(f"↓ {size_text(data['download_rate'])}/с")
             self.stat_rates[1].setText(f"↑ {size_text(data['upload_rate'])}/с")
             minutes, seconds = divmod(data["uptime"], 60)
@@ -1201,14 +1229,16 @@ class MainWindow(
             self.hint.setText(message)
             self.update_network_tag()
 
+        core = self.core
+
         def snapshot():
             try:
-                data = self.core.status()
-                data["groups"] = self.core.groups()
+                data = core.status()
+                data["groups"] = core.groups()
                 return data
             except Exception:
-                if not self.core.running:
-                    self.core.stop("process exited during poll")
+                if not core.running:
+                    core.stop("process exited during poll")
                 raise
 
         generation = self.session_generation
@@ -1218,8 +1248,6 @@ class MainWindow(
         def success(data):
             if not self.closing and generation == self.session_generation:
                 updated(data)
-                import time
-
                 if (
                     self.network_state != "unverified"
                     and time.monotonic() - self.network_checked_at >= 60

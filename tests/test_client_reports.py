@@ -375,12 +375,26 @@ def test_reporting_is_a_pro_only_setting_saved_through_apply(profile, tmp_path, 
     app = QApplication.instance() or QApplication([])
     window = MainWindow(Store(tmp_path), Settings(), profile)
     monkeypatch.setattr(window, "report_client_state", lambda *args, **kwargs: None)
+    window.navigate(2)
+    tabs = window.settings_tabs
+    network = tabs.widget(1)
+    assert tabs.tabText(1) == "Сеть"
+    tabs.setCurrentWidget(network)
+    for control in (
+        window.poll_interval,
+        window.flow_poll_setting,
+        window.flow_history_setting,
+        window.report_sharing,
+        window.report_status,
+    ):
+        assert network.isAncestorOf(control)
+    assert "Состояние и счётчики" in window.report_sharing.accessibleDescription()
     assert "diagnostics" not in window.channel_dialog.options
     assert not window.report_sharing.setting_row.isHidden()
     assert window.report_sharing.isEnabled()
     window.report_sharing.setChecked(True)
     assert window.store.load_settings().client_reports == {}
-    window.save_settings()
+    window.save_button.click()
     assert window.store.load_settings().client_reports == {profile.id: True}
     assert not window.connected and not window.core.running
     assert "api_key" not in window.settings.__dict__

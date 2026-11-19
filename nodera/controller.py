@@ -37,6 +37,7 @@ class Controller:
             headers={"Authorization": f"Bearer {secret}"},
             timeout=2,
             trust_env=False,
+            verify=False,  # The controller only speaks plain HTTP over loopback.
             transport=transport,
         )
 
