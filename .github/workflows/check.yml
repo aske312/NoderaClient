@@ -5,6 +5,11 @@ on:
   pull_request:
     branches: [d-win, pro-win]
   workflow_dispatch:
+    inputs:
+      full_checks:
+        description: 'Run the full test suite on the selected branch'
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -14,7 +19,7 @@ jobs:
   check:
     runs-on: windows-latest
     env:
-      FULL_CHECKS: ${{ github.ref == 'refs/heads/pro-win' || github.base_ref == 'pro-win' }}
+      FULL_CHECKS: ${{ inputs.full_checks || github.ref == 'refs/heads/pro-win' || github.base_ref == 'pro-win' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,8 +34,15 @@ jobs:
         run: .venv\Scripts\python -m compileall -q nodera scripts main.py
       - run: .venv\Scripts\python -m ruff format --check .
         if: env.FULL_CHECKS == 'true'
-      - run: .venv\Scripts\python -m pytest -vv -x --durations=10
+      - run: .venv\Scripts\python -m pytest -vv --durations=10 --junitxml=artifacts/checks/junit.xml
         if: env.FULL_CHECKS == 'true'
         timeout-minutes: 10
         env:
           QT_QPA_PLATFORM: offscreen
+      - uses: actions/upload-artifact@v4
+        if: always() && env.FULL_CHECKS == 'true'
+        with:
+          name: windows-checks-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/checks/junit.xml
+          if-no-files-found: ignore
+          retention-days: 7
