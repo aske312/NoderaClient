@@ -7,7 +7,13 @@ from dataclasses import asdict, replace
 from uuid import uuid4
 
 from nodera.channel_policy import ChannelPolicy, channel_capabilities
-from nodera.channel_selection import SelectionResult, check_cancel, config_digest, selected_config
+from nodera.channel_selection import (
+    SelectionResult,
+    check_cancel,
+    config_digest,
+    rank_channel_results,
+    selected_config,
+)
 from nodera.models import ClientError, Profile, visible_proxies
 from nodera.storage import atomic_write
 
@@ -39,14 +45,10 @@ class DemoChannelService:
         source = next(p for p in demo_library().profiles if p.id == profile.id)
         if self.scenarios:
             self.scenarios.check_subscription(profile.id, updating=True)
-        rows, accepted = [], []
+        rows = []
         for index, node in enumerate(visible_proxies(source.config)):
             check_cancel(cancel)
-            if (
-                not policy.matches(node)
-                or policy.max_channels
-                and len(accepted) >= policy.max_channels
-            ):
+            if not policy.matches(node):
                 rows.append({"name": node["name"], "state": "skipped"})
                 continue
             progress("Демо · проверка " + node["name"])
@@ -70,7 +72,7 @@ class DemoChannelService:
                     "udp": condition["udp"],
                 }
             )
-            accepted.append(node["name"])
+        accepted = rank_channel_results(rows, policy.max_channels)
         if not accepted:
             raise ClientError("Нет демонстрационных каналов с выбранными параметрами.")
         return SelectionResult(

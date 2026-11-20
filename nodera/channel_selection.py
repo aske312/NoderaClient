@@ -30,6 +30,7 @@ from nodera.subscription import MAX_CONFIG_BYTES, parse_config, validate_url
 TRANSFER_URL = "https://speed.cloudflare.com/__down?bytes=262144"
 TRANSFER_BYTES = 262144
 MAX_CHANNELS = 64
+SELECTION_ENABLED = False
 
 
 @dataclass
@@ -46,6 +47,7 @@ class SelectionResult:
     previous_profile: Profile | None = None
     local_applied: bool = False
     restored_config: dict | None = None
+    core_version: str = ""
 
 
 def config_digest(config):
@@ -87,6 +89,8 @@ def command_headers(device_id, core_version=None):
 def request_candidates(
     profile, device_id, require_udp=False, *, proxy=None, transport=None, core_version=None
 ):
+    if not SELECTION_ENABLED:
+        raise ClientError("Авто-маршруты временно недоступны.")
     headers = command_headers(device_id, core_version)
     url = command_url(profile.url)
     started = time.monotonic()
@@ -147,7 +151,9 @@ class CommandUncertain(ClientError):
     """A mutation may have committed; read its status instead of repeating it."""
 
 
-def server_json(profile, device_id, suffix, *, payload=None, proxy=None, transport=None):
+def server_json(
+    profile, device_id, suffix, *, payload=None, proxy=None, transport=None, core_version=None
+):
     method = "GET" if payload is None else "POST"
     try:
         with httpx.Client(
@@ -156,7 +162,7 @@ def server_json(profile, device_id, suffix, *, payload=None, proxy=None, transpo
             with client.stream(
                 method,
                 command_url(profile.url) + suffix,
-                headers=command_headers(device_id),
+                headers=command_headers(device_id, core_version),
                 json=payload,
             ) as response:
                 if 400 <= response.status_code < 500:
@@ -182,7 +188,12 @@ def server_json(profile, device_id, suffix, *, payload=None, proxy=None, transpo
 
 def read_server_selection(result, device_id, *, proxy=None, transport=None):
     data = server_json(
-        result.profile, device_id, "/" + result.operation_id, proxy=proxy, transport=transport
+        result.profile,
+        device_id,
+        "/" + result.operation_id,
+        proxy=proxy,
+        transport=transport,
+        core_version=result.core_version,
     )
     return update_server_selection(result, data)
 
@@ -241,6 +252,8 @@ def update_server_selection(result, data):
 
 
 def change_server_selection(result, device_id, action=None, *, proxy=None, transport=None):
+    if not SELECTION_ENABLED and action in (None, "accept"):
+        raise ClientError("Авто-маршруты временно недоступны.")
     if not result.operation_id:
         result.operation_id = uuid4().hex
     if action is None:
@@ -252,7 +265,11 @@ def change_server_selection(result, device_id, action=None, *, proxy=None, trans
             "require_udp": result.require_udp,
             "reports": [
                 {
-                    key: ("failed" if key == "state" and row[key] == "skipped" else row[key])
+                    key: (
+                        "failed"
+                        if key == "state" and row[key] in {"skipped", "reserve"}
+                        else row[key]
+                    )
                     for key in ("name", "state", "seconds", "transfers", "bytes", "udp")
                     if key in row
                 }
@@ -265,7 +282,13 @@ def change_server_selection(result, device_id, action=None, *, proxy=None, trans
         suffix = "/" + result.operation_id + "/decision"
     try:
         data = server_json(
-            result.profile, device_id, suffix, payload=payload, proxy=proxy, transport=transport
+            result.profile,
+            device_id,
+            suffix,
+            payload=payload,
+            proxy=proxy,
+            transport=transport,
+            core_version=result.core_version,
         )
         return update_server_selection(result, data)
     except CommandUncertain:
@@ -395,6 +418,20 @@ def sustained_probe(core, duration, require_udp, cancel, progress):
     }
 
 
+def rank_channel_results(rows, limit):
+    passed = [row for row in rows if row["state"] == "passed"]
+    ranked = sorted(
+        passed,
+        key=lambda row: row["bytes"] / max(row["seconds"], 0.1),
+        reverse=True,
+    )
+    selected = ranked[:limit] if limit else ranked
+    if limit:
+        for row in ranked[limit:]:
+            row["state"] = "reserve"
+    return [row["name"] for row in selected]
+
+
 def selected_config(config, names):
     """Keep accepted routes/dependencies and preserve the server routing policy."""
     nodes = {n["name"]: n for n in config["proxies"]}
@@ -452,8 +489,9 @@ def select_channels(
     check_cancel(cancel)
     progress("Получение каналов от сервера…")
     manager = CoreUpdates(Path(root).parent)
+    core_version = manager.version()
     config, revision = request_candidates(
-        profile, device_id, require_udp, proxy=proxy, core_version=manager.version()
+        profile, device_id, require_udp, proxy=proxy, core_version=core_version
     )
     check_cancel(cancel)
     try:
@@ -503,14 +541,11 @@ def select_channels(
                     save_connection_logs=False,
                 ),
             )
-            accepted_count = 0
             for index, node in enumerate(candidates):
                 check_cancel(cancel)
                 # The server requires one report per granted channel. Exclusions
                 # are non-passing reports on the wire, never fabricated probes.
-                if not policy.matches(node) or (
-                    policy.max_channels and accepted_count >= policy.max_channels
-                ):
+                if not policy.matches(node):
                     rows.append({"name": node["name"], "state": "skipped"})
                     continue
                 title = f"Канал {index + 1} из {len(candidates)} · {node['name']}"
@@ -528,8 +563,7 @@ def select_channels(
                     check_cancel(cancel)
                     row = {"state": "failed", "reason": "Проверка передачи не пройдена"}
                 rows.append({"name": node["name"], **row})
-                accepted_count += row["state"] == "passed"
-            accepted = [r["name"] for r in rows if r["state"] == "passed"]
+            accepted = rank_channel_results(rows, policy.max_channels)
             if not accepted:
                 raise ClientError(
                     "Ни один канал не прошёл длительную проверку. Текущая подписка сохранена."
@@ -556,7 +590,14 @@ def select_channels(
             core.stop("channel selection finished")
     check_cancel(cancel)
     return SelectionResult(
-        result_profile, rows, revision, time.time(), require_udp, duration, config_digest(config)
+        result_profile,
+        rows,
+        revision,
+        time.time(),
+        require_udp,
+        duration,
+        config_digest(config),
+        core_version=core_version,
     )
 
 

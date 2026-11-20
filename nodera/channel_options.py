@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
+from nodera import channel_selection
 from nodera.channel_policy import PROTOCOL_LABELS, ChannelPolicy, channel_capabilities
 from nodera.controls import ComboBox, NumberBox, Switch
 from nodera.modals import AppDialog
@@ -185,9 +186,12 @@ class ProOptionsDialog(AppDialog):
         self.start.clicked.connect(self.start_selection)
         row.addWidget(self.start)
         layout.addLayout(row)
-        self.add_option(
-            "auto_routes", "Авто-маршруты", "Подбор и проверка каналов Mihomo", self.auto_routes
-        )
+        if channel_selection.SELECTION_ENABLED:
+            self.add_option(
+                "auto_routes", "Авто-маршруты", "Подбор и проверка каналов Mihomo", self.auto_routes
+            )
+        else:
+            self.pages.addWidget(self.auto_routes)
         profile = getattr(owner, "profile", None)
         if profile is not None:
             self.load_policy(profile)
@@ -214,6 +218,9 @@ class ProOptionsDialog(AppDialog):
         self.option_list.addWidget(button)
 
     def show_option(self, key):
+        if key == "auto_routes" and not channel_selection.SELECTION_ENABLED:
+            self.show_overview()
+            return
         self.pages.setCurrentWidget(self.options[key])
         self.fit_page()
 
@@ -302,6 +309,8 @@ class ProOptionsDialog(AppDialog):
             self.status.setText("Состав протоколов изменился. Выберите доступные протоколы.")
 
     def start_selection(self):
+        if not channel_selection.SELECTION_ENABLED:
+            return
         self.show_option("auto_routes")
         protocols = [
             self.protocols.item(index).data(Qt.ItemDataRole.UserRole)

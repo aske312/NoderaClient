@@ -11,6 +11,11 @@ from nodera import channel_selection as channels
 from nodera.models import ClientError, Profile, ProfileLibrary
 
 
+@pytest.fixture(autouse=True)
+def enable_preserved_selection(monkeypatch):
+    monkeypatch.setattr(channels, "SELECTION_ENABLED", True)
+
+
 def profile():
     return Profile(
         "PRO",
@@ -305,9 +310,11 @@ def test_lost_prepare_reply_reads_status_without_repeating_mutation(monkeypatch)
     import yaml
 
     ready = result()
+    ready.core_version = "1.19.34"
     requests = []
 
     def handle(request):
+        assert request.headers["X-Core-Version"] == "1.19.34"
         requests.append(request.method)
         if request.method == "POST":
             raise httpx.ReadTimeout("reply lost", request=request)

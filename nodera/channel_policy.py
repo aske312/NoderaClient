@@ -68,7 +68,7 @@ def channel_capabilities(config, saved=None):
 
 @dataclass
 class ChannelPolicy:
-    max_channels: int = 0
+    max_channels: int = 15
     protocols: list[str] = field(default_factory=list)
     network: str = ""
     require_tls: bool = False

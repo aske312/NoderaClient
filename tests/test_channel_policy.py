@@ -13,6 +13,11 @@ from nodera.models import ClientError, Profile, Settings
 from nodera.storage import Store
 
 
+@pytest.fixture(autouse=True)
+def enable_preserved_selection(monkeypatch):
+    monkeypatch.setattr(channels, "SELECTION_ENABLED", True)
+
+
 def test_filters_combine_and_preserve_protocol_security_semantics():
     policy = ChannelPolicy(protocols=["vless", "trojan"], network="ws", require_tls=True)
     assert policy.matches({"type": "vless", "network": "ws", "tls": True})
@@ -76,8 +81,19 @@ def test_settings_round_trip_and_invalid_preferences(tmp_path):
         store.load_settings()
 
 
+def test_default_selection_keeps_fifteen_fastest_verified_channels():
+    rows = [
+        {"name": str(index), "state": "passed", "bytes": index * 1000, "seconds": 60}
+        for index in range(1, 21)
+    ]
+    assert channels.rank_channel_results(rows, ChannelPolicy().max_channels) == [
+        str(index) for index in range(20, 5, -1)
+    ]
+    assert [row["state"] for row in rows] == ["reserve"] * 5 + ["passed"] * 15
+
+
 @pytest.mark.parametrize("limit", [0, 1, 4])
-def test_selection_skips_filtered_channels_and_counts_only_successes(tmp_path, monkeypatch, limit):
+def test_selection_probes_all_matching_channels_and_limits_the_best(tmp_path, monkeypatch, limit):
     config = {
         "proxies": [
             {"name": "skipped", "type": "ss"},
@@ -99,7 +115,7 @@ def test_selection_skips_filtered_channels_and_counts_only_successes(tmp_path, m
         side_effect=[
             ClientError("failed"),
             {"state": "passed", "seconds": 60, "transfers": 3, "bytes": 786432, "udp": True},
-            {"state": "passed", "seconds": 60, "transfers": 3, "bytes": 786432, "udp": True},
+            {"state": "passed", "seconds": 60, "transfers": 4, "bytes": 1048576, "udp": True},
         ]
     )
     monkeypatch.setattr(channels, "sustained_probe", probe)
@@ -113,15 +129,17 @@ def test_selection_skips_filtered_channels_and_counts_only_successes(tmp_path, m
     assert [row["state"] for row in ready.rows] == [
         "skipped",
         "failed",
+        "reserve" if limit == 1 else "passed",
         "passed",
-        "skipped" if limit == 1 else "passed",
     ]
-    assert probe.call_count == (2 if limit == 1 else 3)
+    assert probe.call_count == 3
     assert {n["name"] for n in ready.profile.config["proxies"]} == (
-        {"good", "__312_transport_x"} if limit == 1 else {"good", "reserve", "__312_transport_x"}
+        {"reserve"} if limit == 1 else {"good", "reserve", "__312_transport_x"}
     )
     assert ready.profile.config["rules"] == config["rules"]
-    assert ready.profile.config["proxy-groups"][0]["proxies"] == ["good"]
+    assert ready.profile.config["proxy-groups"][0]["proxies"] == (
+        ["reserve"] if limit == 1 else ["good"]
+    )
 
     # Exercise the existing server wire contract: all granted channels are
     # reported, exclusions are non-passing, no new API fields are required.

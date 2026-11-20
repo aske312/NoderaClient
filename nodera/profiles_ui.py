@@ -408,7 +408,9 @@ class ProfilesMixin:
         self.delete_button.setEnabled(
             bool(idle and profile and not pending and not (current and self.connected))
         )
-        self.profile_options.setVisible(self.is_pro_profile(profile))
+        self.profile_options.setVisible(
+            self.is_pro_profile(profile) and bool(self.channel_dialog.options)
+        )
         own_pending = (
             not self.pending_channel_result
             or profile
@@ -714,7 +716,9 @@ class ProfilesMixin:
         own = bool(result and target and result.profile.id == target.id)
         dialog = self.channel_dialog
         self.refresh_card_controls()
-        self.dashboard_options_button.setVisible(self.is_pro_profile(self.profile))
+        self.dashboard_options_button.setVisible(
+            self.is_pro_profile(self.profile) and bool(dialog.options)
+        )
         self.dashboard_options_button.setEnabled(
             bool(idle and (not pending or self.profile and pending.profile.id == self.profile.id))
         )
@@ -742,6 +746,8 @@ class ProfilesMixin:
             self.delete_button.setEnabled(False)
 
     def channel_options(self, profile_id=None):
+        if not self.channel_dialog.options:
+            return
         target = next((p for p in self.library.profiles if p.id == profile_id), self.profile)
         if self.closing or not self.is_pro_profile(target):
             return
@@ -772,13 +778,14 @@ class ProfilesMixin:
 
     def show_channel_result(self, result):
         self.channel_dialog.show_option("auto_routes")
-        passed = [row for row in result.rows if row["state"] == "passed"]
+        passed = [row for row in result.rows if row["state"] in {"passed", "reserve"}]
+        selected = sum(row["state"] == "passed" for row in passed)
         total_bytes = sum(row.get("bytes", 0) for row in passed)
         udp_count = sum(bool(row.get("udp")) for row in passed)
         skipped = sum(row["state"] == "skipped" for row in result.rows)
         lines = [
             f"Проверено каналов: {len(result.rows) - skipped}. Успешно: {len(passed)}. "
-            f"Пропущено по настройкам: {skipped}.",
+            f"В подборке: {selected}. Пропущено по настройкам: {skipped}.",
             f"Проверка каждого рабочего канала: не менее {result.duration} с.",
             f"Передано: {total_bytes // 1024} КБ. UDP прошли: {udp_count}.",
         ]
@@ -827,6 +834,10 @@ class ProfilesMixin:
         self.show_channel_result(result)
 
     def start_channel_selection(self, duration=60, require_udp=False, policy=None):
+        from nodera import channel_selection
+
+        if not channel_selection.SELECTION_ENABLED:
+            return
         from copy import deepcopy
         from dataclasses import asdict
 
@@ -920,6 +931,10 @@ class ProfilesMixin:
         )
 
     def apply_ready_channels(self):
+        from nodera import channel_selection
+
+        if not channel_selection.SELECTION_ENABLED:
+            return
         from copy import deepcopy
 
         target = self.channel_target_profile()

@@ -19,6 +19,11 @@ from nodera.subscription import SubscriptionUnavailable
 from nodera.test_scenarios import DEMO_IDS, DEMO_PROFILES
 
 
+@pytest.fixture(autouse=True)
+def enable_preserved_selection(monkeypatch):
+    monkeypatch.setattr("nodera.channel_selection.SELECTION_ENABLED", True)
+
+
 @pytest.fixture
 def no_network(monkeypatch):
     monkeypatch.setattr("nodera.versioning.git_revision", lambda *args: "demo-test")
