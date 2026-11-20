@@ -1,9 +1,37 @@
 import os
 import socket
+from contextlib import contextmanager
 
 import pytest
 
 from nodera.ports import choose_ports, listener_owners
+
+
+def test_port_selection_escapes_a_tcp_excluded_udp_candidate(monkeypatch):
+    calls = []
+
+    class Bound:
+        def __init__(self, port):
+            self.port = port
+
+        def getsockname(self):
+            return "127.0.0.1", self.port
+
+    @contextmanager
+    def bind(port=0, kind=socket.SOCK_STREAM):
+        calls.append((port, kind))
+        if kind == socket.SOCK_DGRAM:
+            yield Bound(port or 49800)
+        elif port == 49800:
+            raise PermissionError(10013, "TCP range excluded by Windows")
+        else:
+            yield Bound(port or 62000)
+
+    monkeypatch.setattr("nodera.ports.bound_socket", bind)
+    monkeypatch.setattr("nodera.ports.secrets.randbelow", lambda limit: 10000)
+    proxy, controller = choose_ports()
+    assert proxy != 49800 and controller != proxy
+    assert len(calls) < 32
 
 
 def test_automatic_ports_are_distinct_and_skip_an_occupied_preference():

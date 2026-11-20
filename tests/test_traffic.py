@@ -25,7 +25,7 @@ from nodera.bundled_core import bundled_location
 from nodera.core import CREATE_FLAGS, Core, runtime_config
 from nodera.geodata import prepare_session_geodata
 from nodera.models import ClientError, Profile, Settings
-from tests.loopback import ThreadingHTTPServer
+from tests.loopback import ThreadingHTTPServer, ThreadingTCPServer
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -97,7 +97,7 @@ def test_https_upload_download_reaches_proxy_server_and_recovers_after_bad_selec
     tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     tls.load_cert_chain(FIXTURES / "localhost-cert.pem", FIXTURES / "localhost-key.pem")
     origin.socket = tls.wrap_socket(origin.socket, server_side=True)
-    gateway = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Gateway)
+    gateway = ThreadingTCPServer(("127.0.0.1", 0), Gateway)
     gateway.daemon_threads = True
     gateway.origin_port, gateway.connections = origin.server_port, 0
     core = Core(tmp_path)

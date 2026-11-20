@@ -2,6 +2,7 @@
 
 import ctypes
 import os
+import secrets
 import socket
 from ctypes import wintypes
 
@@ -26,7 +27,10 @@ def choose_ports(preferred=0):
     last_error = None
     for attempt in range(32):
         try:
-            with bound_socket(preferred if attempt == 0 else 0, socket.SOCK_DGRAM) as udp:
+            # TCP and UDP can have different excluded ranges. Repeated bind(0)
+            # may walk one blocked range instead of reaching an available port.
+            candidate = preferred if attempt == 0 else 49152 + secrets.randbelow(16384)
+            with bound_socket(candidate, socket.SOCK_DGRAM) as udp:
                 with bound_socket(udp.getsockname()[1]) as proxy, bound_socket() as controller:
                     return proxy.getsockname()[1], controller.getsockname()[1]
         except OSError as exc:

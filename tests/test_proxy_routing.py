@@ -19,7 +19,7 @@ import pytest
 from nodera.bundled_core import bundled_location
 from nodera.core import Core
 from nodera.models import ClientError, Profile, Settings
-from tests.loopback import ThreadingHTTPServer
+from tests.loopback import ThreadingHTTPServer, ThreadingTCPServer
 from tests.test_traffic import Gateway, serving
 
 pytestmark = pytest.mark.skipif(
@@ -96,9 +96,7 @@ def routing_lab(tmp_path, protocol, request):
         tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         tls.load_cert_chain(FIXTURES / "localhost-cert.pem", FIXTURES / "localhost-key.pem")
         origin.socket = tls.wrap_socket(origin.socket, server_side=True)
-    gateway = socketserver.ThreadingTCPServer(
-        ("127.0.0.1", 0), getattr(request, "param", RecordingGateway)
-    )
+    gateway = ThreadingTCPServer(("127.0.0.1", 0), getattr(request, "param", RecordingGateway))
     gateway.daemon_threads = True
     gateway.origin_port = origin.server_port
     gateway.destinations, gateway.counter_lock = [], threading.Lock()
