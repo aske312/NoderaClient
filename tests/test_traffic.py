@@ -55,6 +55,9 @@ class Origin(BaseHTTPRequestHandler):
 
 
 class Gateway(socketserver.StreamRequestHandler):
+    # Preserve payload coalesced with CONNECT headers for raw-socket forwarding.
+    rbufsize = 0
+
     def handle(self):
         self.connection.settimeout(5)
         method, destination, _ = self.rfile.readline().decode().strip().split()

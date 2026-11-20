@@ -20,7 +20,7 @@ from nodera.bundled_core import bundled_location
 from nodera.core import Core
 from nodera.models import ClientError, Profile, Settings
 from tests.loopback import ThreadingHTTPServer
-from tests.test_traffic import serving
+from tests.test_traffic import Gateway, serving
 
 pytestmark = pytest.mark.skipif(
     os.name != "nt" or not bundled_location().is_file(), reason="Windows core"
@@ -54,6 +54,10 @@ class EchoOrigin(BaseHTTPRequestHandler):
 
 
 class RecordingGateway(socketserver.StreamRequestHandler):
+    # CONNECT may arrive with TLS data in the same write. Do not read that
+    # payload into rfile's buffer before forwarding the raw socket.
+    rbufsize = 0
+
     def handle(self):
         self.connection.settimeout(5)
         method, destination, _ = self.rfile.readline().decode().strip().split()
@@ -83,7 +87,7 @@ class RecordingGateway(socketserver.StreamRequestHandler):
 
 
 @pytest.fixture
-def routing_lab(tmp_path, protocol):
+def routing_lab(tmp_path, protocol, request):
     origin = ThreadingHTTPServer(("127.0.0.1", 0), EchoOrigin)
     origin.daemon_threads = True
     origin.received, origin.counter_lock = [], threading.Lock()
@@ -92,10 +96,13 @@ def routing_lab(tmp_path, protocol):
         tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         tls.load_cert_chain(FIXTURES / "localhost-cert.pem", FIXTURES / "localhost-key.pem")
         origin.socket = tls.wrap_socket(origin.socket, server_side=True)
-    gateway = socketserver.ThreadingTCPServer(("127.0.0.1", 0), RecordingGateway)
+    gateway = socketserver.ThreadingTCPServer(
+        ("127.0.0.1", 0), getattr(request, "param", RecordingGateway)
+    )
     gateway.daemon_threads = True
     gateway.origin_port = origin.server_port
     gateway.destinations, gateway.counter_lock = [], threading.Lock()
+    gateway.connections = 0
     core = Core(tmp_path / "runtime")
     profile = Profile(
         "Proxy routing",
@@ -293,3 +300,24 @@ def test_proxy_concurrent_transfers_keep_routes_and_payloads_across_three_sessio
         assert not core.running and not runtime.exists()
     assert len(origin.received) == 72
     assert sum(origin.received) == transferred == 72 * 16384
+
+
+@pytest.mark.parametrize("protocol", ["http-plain"])
+@pytest.mark.parametrize("routing_lab", [RecordingGateway, Gateway], indirect=True)
+def test_gateway_preserves_payload_coalesced_with_connect_headers(routing_lab, protocol):
+    _, _, origin, gateway = routing_lab
+    payload = b"CONNECT and payload in one TCP write"
+    with socket.create_connection(gateway.server_address, timeout=2) as stream:
+        stream.sendall(
+            f"CONNECT 127.0.0.1:{origin.server_port} HTTP/1.1\r\nHost: localhost\r\n\r\n".encode()
+            + f"POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: {len(payload)}\r\n\r\n".encode()
+            + payload
+        )
+        response = bytearray()
+        while not response.endswith(b"\r\n\r\n"):
+            response.extend(exact(stream, 1))
+        assert response.startswith(b"HTTP/1.1 200")
+        echoed = http.client.HTTPResponse(stream)
+        echoed.begin()
+        assert echoed.status == 200
+        assert echoed.read() == payload
