@@ -1,9 +1,32 @@
 """Exclusive Windows listeners for isolated loopback integration fixtures."""
 
 import os
+import select
 import socket
 from http.server import ThreadingHTTPServer as BaseHTTPServer
 from socketserver import ThreadingTCPServer as BaseTCPServer
+
+
+def relay_connections(client, upstream, timeout=5):
+    """Forward both directions until each peer has finished sending."""
+    reading = [client, upstream]
+    while reading:
+        readable, _, _ = select.select(reading, [], [], timeout)
+        if not readable:
+            return
+        for source in readable:
+            target = upstream if source is client else client
+            data = source.recv(65536)
+            if data:
+                target.sendall(data)
+                continue
+            reading.remove(source)
+            # A request-side FIN still permits the server's response. Propagate
+            # only the write-side close and continue forwarding the other peer.
+            try:
+                target.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
 
 
 class ThreadingHTTPServer(BaseHTTPServer):

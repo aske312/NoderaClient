@@ -19,7 +19,7 @@ import pytest
 from nodera.bundled_core import bundled_location
 from nodera.core import Core
 from nodera.models import ClientError, Profile, Settings
-from tests.loopback import ThreadingHTTPServer, ThreadingTCPServer
+from tests.loopback import ThreadingHTTPServer, ThreadingTCPServer, relay_connections
 from tests.test_traffic import Gateway, serving
 
 pytestmark = pytest.mark.skipif(
@@ -74,16 +74,7 @@ class RecordingGateway(socketserver.StreamRequestHandler):
                 self.server.destinations.append(host)
             self.wfile.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
             self.wfile.flush()
-            while True:
-                readable, _, _ = select.select([self.connection, upstream], [], [], 5)
-                if not readable:
-                    return
-                for source in readable:
-                    data = source.recv(65536)
-                    if not data:
-                        return
-                    target = upstream if source is self.connection else self.connection
-                    target.sendall(data)
+            relay_connections(self.connection, upstream)
 
 
 @pytest.fixture
@@ -319,3 +310,36 @@ def test_gateway_preserves_payload_coalesced_with_connect_headers(routing_lab, p
         echoed.begin()
         assert echoed.status == 200
         assert echoed.read() == payload
+
+
+@pytest.mark.parametrize("protocol", ["http-plain"])
+@pytest.mark.parametrize("routing_lab", [RecordingGateway, Gateway], indirect=True)
+def test_gateway_preserves_response_after_client_write_half_close(routing_lab, protocol):
+    _, _, origin, gateway = routing_lab
+    payload = b"The response must survive a client write-side FIN"
+    origin.waiting.clear()
+    origin.release.clear()
+    try:
+        with socket.create_connection(gateway.server_address, timeout=2) as stream:
+            stream.sendall(
+                f"CONNECT 127.0.0.1:{origin.server_port} HTTP/1.1\r\nHost: localhost\r\n\r\n".encode()
+            )
+            response = bytearray()
+            while not response.endswith(b"\r\n\r\n"):
+                response.extend(exact(stream, 1))
+            assert response.startswith(b"HTTP/1.1 200")
+            stream.sendall(
+                f"POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: {len(payload)}\r\nX-Test-Hold: 1\r\nConnection: close\r\n\r\n".encode()
+                + payload
+            )
+            stream.shutdown(socket.SHUT_WR)
+            assert origin.waiting.wait(2)
+            readable, _, _ = select.select([stream], [], [], 0.1)
+            assert not readable, "Gateway closed the response side after the client write-side FIN"
+            origin.release.set()
+            echoed = http.client.HTTPResponse(stream)
+            echoed.begin()
+            assert echoed.status == 200
+            assert echoed.read() == payload
+    finally:
+        origin.release.set()

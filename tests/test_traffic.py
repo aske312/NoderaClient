@@ -5,7 +5,6 @@ No Internet, Windows proxy changes, or TUN routes are used by these tests.
 """
 
 import os
-import select
 import socket
 import socketserver
 import ssl
@@ -25,7 +24,7 @@ from nodera.bundled_core import bundled_location
 from nodera.core import CREATE_FLAGS, Core, runtime_config
 from nodera.geodata import prepare_session_geodata
 from nodera.models import ClientError, Profile, Settings
-from tests.loopback import ThreadingHTTPServer, ThreadingTCPServer
+from tests.loopback import ThreadingHTTPServer, ThreadingTCPServer, relay_connections
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -73,17 +72,7 @@ class Gateway(socketserver.StreamRequestHandler):
             self.server.connections += 1
             self.wfile.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
             self.wfile.flush()
-            peers = [self.connection, upstream]
-            while True:
-                readable, _, _ = select.select(peers, [], [], 5)
-                if not readable:
-                    return
-                for source in readable:
-                    data = source.recv(65536)
-                    if not data:
-                        return
-                    target = upstream if source is self.connection else self.connection
-                    target.sendall(data)
+            relay_connections(self.connection, upstream)
 
 
 @pytest.mark.skipif(os.name != "nt" or not bundled_location().is_file(), reason="Windows core")
