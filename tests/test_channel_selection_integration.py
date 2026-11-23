@@ -16,6 +16,7 @@ from nodera import channel_selection as channels
 from nodera.bundled_core import bundled_location, resolve_core
 from nodera.core import CREATE_FLAGS, free_port
 from nodera.models import Profile
+from nodera.ports import choose_ports
 from tests.loopback import ThreadingHTTPServer
 
 
@@ -65,7 +66,7 @@ def test_real_proxy_sustained_transfer_udp_and_failed_route(tmp_path, monkeypatc
 
     dns_thread = threading.Thread(target=dns_server, daemon=True)
     dns_thread.start()
-    port = free_port()
+    port, _ = choose_ports()
     backend_root = tmp_path / "backend"
     backend_root.mkdir()
     backend_config = backend_root / "config.yaml"
