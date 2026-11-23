@@ -1,4 +1,4 @@
-"""Loopback acceptance with real Mihomo and a Shadowsocks TCP/UDP server."""
+"""Loopback acceptance with real Mihomo and encrypted TCP/UDP servers."""
 
 import copy
 import os
@@ -20,7 +20,13 @@ from tests.loopback import ThreadingHTTPServer
 
 
 @pytest.mark.skipif(os.name != "nt" or not bundled_location().is_file(), reason="Windows Mihomo")
-def test_real_shadowsocks_sustained_transfer_udp_and_failed_route(tmp_path, monkeypatch):
+@pytest.mark.parametrize("protocol", ["ss", "snell6"])
+def test_real_proxy_sustained_transfer_udp_and_failed_route(tmp_path, monkeypatch, protocol):
+    inbound = {"type": "shadowsocks", "cipher": "aes-128-gcm", "password": "local-test"}
+    outbound = {"type": "ss", "cipher": "aes-128-gcm", "password": "local-test"}
+    if protocol == "snell6":
+        inbound = outbound = {"type": "snell", "version": 6, "psk": "local-test-snell6"}
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             payload = b"x" * channels.TRANSFER_BYTES if self.path == "/data" else b""
@@ -67,16 +73,14 @@ def test_real_shadowsocks_sustained_transfer_udp_and_failed_route(tmp_path, monk
         yaml.safe_dump(
             {
                 "mode": "direct",
-                "log-level": "silent",
+                "log-level": "info",
                 "allow-lan": False,
                 "listeners": [
                     {
-                        "name": "test-ss",
-                        "type": "shadowsocks",
+                        "name": "test-proxy",
+                        **inbound,
                         "listen": "127.0.0.1",
                         "port": port,
-                        "cipher": "aes-128-gcm",
-                        "password": "local-test",
                         "udp": True,
                     }
                 ],
@@ -84,10 +88,12 @@ def test_real_shadowsocks_sustained_transfer_udp_and_failed_route(tmp_path, monk
         ),
         encoding="utf-8",
     )
+    backend_log_path = backend_root / "backend.log"
+    backend_log = backend_log_path.open("wb")
     process = subprocess.Popen(
         [str(resolve_core()), "-d", str(backend_root), "-f", str(backend_config)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=backend_log,
+        stderr=subprocess.STDOUT,
         creationflags=CREATE_FLAGS,
     )
     try:
@@ -97,26 +103,24 @@ def test_real_shadowsocks_sustained_transfer_udp_and_failed_route(tmp_path, monk
                 with socket.create_connection(("127.0.0.1", port), timeout=0.1):
                     break
             except OSError:
-                assert time.monotonic() < deadline and process.poll() is None
+                assert time.monotonic() < deadline and process.poll() is None, (
+                    backend_log_path.read_text(encoding="utf-8", errors="replace")
+                )
                 time.sleep(0.05)
         config = {
             "proxies": [
                 {
                     "name": "working",
-                    "type": "ss",
+                    **outbound,
                     "server": "127.0.0.1",
                     "port": port,
-                    "cipher": "aes-128-gcm",
-                    "password": "local-test",
                     "udp": True,
                 },
                 {
                     "name": "unreachable",
-                    "type": "ss",
+                    **outbound,
                     "server": "127.0.0.1",
                     "port": free_port(),
-                    "cipher": "aes-128-gcm",
-                    "password": "local-test",
                     "udp": True,
                 },
             ],
@@ -151,6 +155,7 @@ def test_real_shadowsocks_sustained_transfer_udp_and_failed_route(tmp_path, monk
     finally:
         process.terminate()
         process.wait(timeout=10)
+        backend_log.close()
         stopped.set()
         udp.close()
         dns_thread.join(timeout=2)
